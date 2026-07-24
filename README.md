@@ -1,5 +1,7 @@
 # Buzzbox
 
+<img width="3456" height="2234" alt="tpsmlhvh-6903 euw devtunnels ms_(MacBook Pro 16_)" src="https://github.com/user-attachments/assets/725ae16b-fd37-4572-85c1-9226261a6e8e" />
+
 Buzzbox is a browser-accessible Linux desktop with a complete local
 [Buzz](https://github.com/block/buzz) workspace and the Codex and Claude Code
 agent runtimes already installed.
@@ -66,14 +68,14 @@ changes the host-side published port.
 The desktop and relay are pinned together rather than mixing a moving relay
 with a released client:
 
-| Component | Version |
-| --- | --- |
-| Buzz desktop | `0.4.24` |
-| Buzz relay | upstream commit `710ed9f` |
-| Codex | `0.145.0` |
-| Claude Code | `2.1.219` |
-| Codex ACP adapter | `1.1.7` |
-| Claude ACP adapter | `0.62.0` |
+| Component          | Version                   |
+| ------------------ | ------------------------- |
+| Buzz desktop       | `0.4.24`                  |
+| Buzz relay         | upstream commit `710ed9f` |
+| Codex              | `0.145.0`                 |
+| Claude Code        | `2.1.219`                 |
+| Codex ACP adapter  | `1.1.7`                   |
+| Claude ACP adapter | `0.62.0`                  |
 
 The Buzz `.deb` is SHA-256 verified during the build. The relay and MinIO
 stages use immutable container references.
@@ -95,14 +97,14 @@ therefore preserves identities, messages, service data, and agent logins.
 
 All backing services bind only inside the container:
 
-| Service | Address |
-| --- | --- |
-| Buzz relay | `0.0.0.0:3000` |
+| Service      | Address          |
+| ------------ | ---------------- |
+| Buzz relay   | `0.0.0.0:3000`   |
 | Relay health | `127.0.0.1:8080` |
-| PostgreSQL | `127.0.0.1:5432` |
-| Redis | `127.0.0.1:6379` |
-| MinIO | `127.0.0.1:9000` |
-| KasmVNC | `0.0.0.0:6901` |
+| PostgreSQL   | `127.0.0.1:5432` |
+| Redis        | `127.0.0.1:6379` |
+| MinIO        | `127.0.0.1:9000` |
+| KasmVNC      | `0.0.0.0:6901`   |
 
 Only KasmVNC and the Buzz relay are published by the Makefile, both on
 `127.0.0.1` by default.
