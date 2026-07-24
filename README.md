@@ -1,10 +1,62 @@
 # Buzzbox
 
-<img width="3456" height="2234" alt="tpsmlhvh-6903 euw devtunnels ms_(MacBook Pro 16_)" src="https://github.com/user-attachments/assets/725ae16b-fd37-4572-85c1-9226261a6e8e" />
+<img width="3456" height="2234" alt="Buzzbox running the Buzz desktop in a web browser" src="https://github.com/user-attachments/assets/725ae16b-fd37-4572-85c1-9226261a6e8e" />
 
-Buzzbox is a browser-accessible Linux desktop with a complete local
-[Buzz](https://github.com/block/buzz) workspace and the Codex and Claude Code
-agent runtimes already installed.
+## What is Buzzbox?
+
+[Buzz](https://github.com/block/buzz) is a shared workspace where people and AI
+agents work together. It brings conversations, channels, projects, workflows,
+media, and search into one place. Agents join the same rooms as people, so their
+work and decisions remain visible to the whole team.
+
+Buzzbox is a ready-to-run Buzz environment that opens in your web browser. One
+command starts the Buzz desktop, its local relay, storage, and supporting
+services. Codex and Claude Code are included as optional agents you can add to
+the workspace.
+
+## Quick start
+
+Buzzbox is published as a complete image on GitHub Container Registry.
+
+With Docker:
+
+```bash
+docker pull ghcr.io/pdparchitect/buzzbox:latest
+docker run --detach \
+  --name buzzbox \
+  --platform linux/amd64 \
+  --restart unless-stopped \
+  --shm-size 1g \
+  --publish 127.0.0.1:6903:6901 \
+  --publish 127.0.0.1:3000:3000 \
+  ghcr.io/pdparchitect/buzzbox:latest
+```
+
+With Podman:
+
+```bash
+podman pull ghcr.io/pdparchitect/buzzbox:latest
+podman run --detach \
+  --name buzzbox \
+  --platform linux/amd64 \
+  --restart unless-stopped \
+  --shm-size 1g \
+  --publish 127.0.0.1:6903:6901 \
+  --publish 127.0.0.1:3000:3000 \
+  ghcr.io/pdparchitect/buzzbox:latest
+```
+
+Open <http://127.0.0.1:6903>.
+
+The same image works with other OCI-compatible runtimes, including containerd
+with nerdctl. Use the same port mappings shown above. The image currently
+targets `linux/amd64`; ARM hosts need x86-64 container emulation.
+
+## What is inside?
+
+Under the hood, Buzzbox is a browser-accessible Linux desktop with a complete
+local [Buzz](https://github.com/block/buzz) workspace. Codex and Claude Code are
+already installed and connected through their agent adapters.
 
 One command boots:
 
@@ -18,12 +70,18 @@ One command boots:
 The environment is self-contained. It does not require a host Docker socket or
 a separate Compose stack.
 
-## Run
+## Build locally
 
 From this directory:
 
 ```bash
 make up
+```
+
+The Makefile uses Docker by default. To build and run with Podman:
+
+```bash
+make up DOCKER=podman
 ```
 
 Open <http://127.0.0.1:6903>. Buzz launches automatically after the local relay
@@ -124,3 +182,12 @@ environment is placed behind suitable authentication and network controls.
 Each Buzzbox instance generates stable relay, git-hook, and MinIO secrets on
 first boot and persists them in the services volume. No credentials are
 committed.
+
+## Releases
+
+CI builds and smoke-tests every change. After successful CI on `main`, the
+version-driven release workflows publish versioned and `latest` images to
+`ghcr.io/pdparchitect/buzzbox` and create a matching GitHub Release.
+
+See [RELEASES.md](RELEASES.md) for the release process, image tags, supported
+architecture, and package visibility requirements.
