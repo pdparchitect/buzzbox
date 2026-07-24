@@ -1,0 +1,106 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - next
+    tags-ignore:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+      - next
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and smoke test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Validate release metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          VERSION="$(tr -d '[:space:]' < VERSION)"
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "VERSION is not valid semantic versioning: $VERSION" >&2
+            exit 1
+          fi
+
+          if ! grep -q "^## \\[$VERSION\\]" CHANGELOG.md; then
+            echo "CHANGELOG.md has no section for $VERSION" >&2
+            exit 1
+          fi
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          platforms: linux/amd64
+          push: false
+          tags: pdparchitect/buzzbox:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          container="buzzbox-ci"
+          cleanup() {
+            docker rm --force "$container" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          docker run --detach \
+            --name "$container" \
+            --platform linux/amd64 \
+            --shm-size 1g \
+            --publish 127.0.0.1:16903:6901 \
+            --publish 127.0.0.1:13000:3000 \
+            pdparchitect/buzzbox:ci
+
+          ready=false
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:16903/index.html \
+                >/dev/null &&
+              docker exec "$container" curl --fail --silent \
+                http://127.0.0.1:8080/_readiness >/dev/null; then
+              ready=true
+              break
+            fi
+            sleep 2
+          done
+
+          if [ "$ready" != "true" ]; then
+            echo "Buzzbox did not become ready within 120 seconds" >&2
+            docker logs --tail 150 "$container" >&2 || true
+            exit 1
+          fi
+
+          docker exec "$container" bash -ec '
+            for command in buzz-desktop buzz buzz-acp buzz-agent buzz-relay \
+              codex codex-acp claude claude-agent-acp; do
+              command -v "$command" >/dev/null
+            done
+            redis-cli ping | grep -q PONG
+            pg_isready -h 127.0.0.1 -p 5432 -U buzz >/dev/null
+            curl -fsS http://127.0.0.1:9000/minio/health/live >/dev/null
+            pgrep -x buzz-relay >/dev/null
+            pgrep -f buzz-desktop >/dev/null
+          '
+
+          echo "Buzzbox is ready with the desktop, relay, and agent runtimes"

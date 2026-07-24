@@ -19,3 +19,7 @@ All notable changes to Buzzbox are documented here, following
 - Preinstall Codex, Claude Code, and both Buzz-supported ACP adapters.
 - Persist the relay, desktop, workspace, Codex, and Claude state in named
   Docker volumes.
+- Add direct pull-and-run instructions for Docker, Podman, nerdctl, and
+  compatible OCI container runtimes.
+- Add CI, automatic release tagging, GHCR image publishing, SBOM generation,
+  provenance attestations, and GitHub Releases.
