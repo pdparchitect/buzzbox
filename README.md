@@ -1,6 +1,6 @@
 # Buzzbox
 
-<img width="3456" height="2234" alt="Buzzbox running the Buzz desktop in a web browser" src="https://github.com/user-attachments/assets/725ae16b-fd37-4572-85c1-9226261a6e8e" />
+<img width="1760" height="894" alt="98b82e2c-1339-4ca7-99ab-4b49f8bb604d" src="https://github.com/user-attachments/assets/c23ef9c5-a26f-4a94-a540-286ad50df0bd" />
 
 ## What is Buzzbox?
 
@@ -13,6 +13,8 @@ Buzzbox is a ready-to-run Buzz environment that opens in your web browser. One
 command starts the Buzz desktop, its local relay, storage, and supporting
 services. Codex and Claude Code are included as optional agents you can add to
 the workspace.
+
+<img width="3456" height="2234" alt="tpsmlhvh-6903 euw devtunnels ms_(MacBook Pro 16_) (1)" src="https://github.com/user-attachments/assets/2b110431-d484-4473-959d-2ca6a1dfb153" />
 
 ## Quick start
 
