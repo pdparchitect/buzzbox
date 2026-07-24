@@ -1,0 +1,17 @@
+#!/bin/bash
+# Start the Buzz desktop with the local Buzzbox relay and container-safe
+# software-rendering defaults.
+
+set -euo pipefail
+
+if pgrep -f '(^|/)buzz-desktop($| )' >/dev/null 2>&1; then
+    wmctrl -xa buzz-desktop 2>/dev/null || true
+    exit 0
+fi
+
+export BUZZ_RELAY_URL="${BUZZ_RELAY_URL:-ws://127.0.0.1:3000}"
+export WEBKIT_DISABLE_COMPOSITING_MODE="${WEBKIT_DISABLE_COMPOSITING_MODE:-1}"
+export LIBGL_ALWAYS_SOFTWARE="${LIBGL_ALWAYS_SOFTWARE:-1}"
+export GDK_BACKEND=x11
+
+exec buzz-desktop
