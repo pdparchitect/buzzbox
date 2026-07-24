@@ -1,0 +1,85 @@
+#!/bin/bash
+# Openbox autostart - runs when the browser desktop session begins.
+
+set -e
+
+if [ ! -f "$HOME/.config/mimeapps.list" ]; then
+  mkdir -p "$HOME/.local/share/applications" "$HOME/.config"
+  cat > "$HOME/.local/share/applications/chromium-buzzbox.desktop" <<'CHROMEDESKTOP'
+[Desktop Entry]
+Name=Chrome
+Exec=chromium %u
+Type=Application
+MimeType=x-scheme-handler/http;x-scheme-handler/https;text/html;
+NoDisplay=true
+CHROMEDESKTOP
+  cat > "$HOME/.config/mimeapps.list" <<'MIMEAPPS'
+[Default Applications]
+x-scheme-handler/http=chromium-buzzbox.desktop
+x-scheme-handler/https=chromium-buzzbox.desktop
+text/html=chromium-buzzbox.desktop
+MIMEAPPS
+  xdg-settings set default-web-browser chromium-buzzbox.desktop 2>/dev/null || true
+fi
+export BROWSER=chromium
+
+# Kitty is tuned for a software-rendered remote display.
+mkdir -p "$HOME/.config/kitty"
+cat > "$HOME/.config/kitty/kitty.conf" <<'KITTYCONF'
+detect_urls yes
+open_url_with chromium
+url_color #5599ff
+cursor_shape block
+shell_integration no-cursor
+window_padding_width 8
+repaint_delay 40
+input_delay 8
+sync_to_monitor no
+cursor_blink_interval 0
+mouse_hide_wait 0
+disable_ligatures always
+resize_debounce_time 0.1
+KITTYCONF
+
+wallpaper_dir="/usr/share/backgrounds/simpledesktops"
+wallpaper_state="$HOME/.wallpaper"
+
+if [ -f "$wallpaper_state" ] && [ -f "$(cat "$wallpaper_state")" ]; then
+  wallpaper="$(cat "$wallpaper_state")"
+else
+  wallpaper="$(find "$wallpaper_dir" -maxdepth 1 -type f \
+    \( -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' \) | shuf -n 1)"
+  [ -n "$wallpaper" ] && echo "$wallpaper" > "$wallpaper_state"
+fi
+
+if [ -n "$wallpaper" ]; then
+  rm -f "$HOME/.fehbg"
+  (
+    last_res=""
+    while true; do
+      cur_res="$(xdpyinfo -display "${DISPLAY:-:1}" 2>/dev/null \
+        | awk '/dimensions/{print $2}')"
+      if [ -n "$cur_res" ] && [ "$cur_res" != "$last_res" ]; then
+        feh --no-fehbg --bg-fill "$wallpaper"
+        last_res="$cur_res"
+      fi
+      sleep 2
+    done
+  ) &
+fi
+
+tint2 &
+cortilectl start &
+
+# Buzz is the primary application and fills the desktop on every boot.
+(
+  for attempt in $(seq 1 30); do
+    if curl -fsS http://127.0.0.1:8080/_readiness >/dev/null 2>&1; then
+      exec buzzbox
+    fi
+    sleep 1
+  done
+
+  kitty --title "Buzzbox" -e bash -lc \
+    'echo "Buzz relay is unavailable. Run: sudo tail -f /var/log/buzzbox/buzz-relay.log"; exec bash' &
+) &

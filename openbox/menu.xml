@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<openbox_menu xmlns="http://openbox.org/3.4/menu">
+  <menu id="root-menu" label="Buzzbox">
+    <item label="Buzz">
+      <action name="Execute">
+        <command>buzzbox</command>
+      </action>
+    </item>
+    <separator />
+    <item label="Terminal">
+      <action name="Execute">
+        <command>kitty</command>
+      </action>
+    </item>
+    <item label="Welcome">
+      <action name="Execute">
+        <command>kitty --title "Buzzbox" -e welcome</command>
+      </action>
+    </item>
+    <item label="File Manager">
+      <action name="Execute">
+        <command>kitty -e ranger</command>
+      </action>
+    </item>
+    <item label="Task Manager">
+      <action name="Execute">
+        <command>kitty -e htop</command>
+      </action>
+    </item>
+    <separator />
+    <item label="Chrome">
+      <action name="Execute">
+        <command>chromium file:///opt/browser/index.html</command>
+      </action>
+    </item>
+    <separator />
+    <menu id="setup-menu" label="Agent Setup">
+      <item label="Log in to Codex">
+        <action name="Execute">
+          <command>kitty --title "Codex Login" -e bash -lc "codex login; exec bash"</command>
+        </action>
+      </item>
+      <item label="Log in to Claude Code">
+        <action name="Execute">
+          <command>kitty --title "Claude Login" -e bash -lc "claude auth login; exec bash"</command>
+        </action>
+      </item>
+      <separator />
+      <item label="Codex Status">
+        <action name="Execute">
+          <command>kitty --title "Codex Status" -e bash -lc "codex login status; exec bash"</command>
+        </action>
+      </item>
+      <item label="Claude Status">
+        <action name="Execute">
+          <command>kitty --title "Claude Status" -e bash -lc "claude auth status; exec bash"</command>
+        </action>
+      </item>
+    </menu>
+    <menu id="service-menu" label="Services">
+      <item label="Buzz Relay Log">
+        <action name="Execute">
+          <command>kitty --title "Buzz Relay" -e tail -n 200 -f /var/log/buzzbox/buzz-relay.log</command>
+        </action>
+      </item>
+      <item label="Buzzbox Log Directory">
+        <action name="Execute">
+          <command>kitty -e ranger /var/log/buzzbox</command>
+        </action>
+      </item>
+    </menu>
+    <separator />
+    <menu id="tiling-menu" label="Tiling Mode">
+      <item label="Enable Tiling">
+        <action name="Execute">
+          <command>cortilectl on</command>
+        </action>
+      </item>
+      <item label="Disable Tiling (Floating)">
+        <action name="Execute">
+          <command>cortilectl off</command>
+        </action>
+      </item>
+      <item label="Toggle Tiling">
+        <action name="Execute">
+          <command>cortilectl toggle</command>
+        </action>
+      </item>
+      <separator />
+      <item label="Next Layout">
+        <action name="Execute">
+          <command>cortilectl next-layout</command>
+        </action>
+      </item>
+      <item label="Previous Layout">
+        <action name="Execute">
+          <command>cortilectl prev-layout</command>
+        </action>
+      </item>
+    </menu>
+  </menu>
+</openbox_menu>

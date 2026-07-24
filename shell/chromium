@@ -1,0 +1,24 @@
+#!/bin/bash
+# chromium - wrapper that launches Google Chrome with container-safe flags.
+# Placed in /usr/local/bin to override any system chromium and provide a
+# single entry point for menus, xdg-open, kitty, and CLI tools.
+
+# Only disable the GPU when there is no render node to drive it. With one
+# present Chrome can composite and rasterize on the GPU, which removes the
+# largest source of repaint work on this desktop.
+gpu_args=(--disable-gpu --disable-software-rasterizer)
+if compgen -G '/dev/dri/renderD*' >/dev/null; then
+    gpu_args=(--ignore-gpu-blocklist --enable-gpu-rasterization)
+fi
+
+exec /opt/google/chrome/google-chrome \
+    --no-sandbox \
+    --test-type \
+    "${gpu_args[@]}" \
+    --disable-dev-shm-usage \
+    --no-first-run \
+    --no-default-browser-check \
+    --disable-infobars \
+    --force-dark-mode \
+    --enable-features=WebContentsForceDark \
+    "$@"
