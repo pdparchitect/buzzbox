@@ -3,34 +3,35 @@
 
 clear
 
-C=$'\e[38;2;255;255;255m'
+Y=$'\e[38;2;215;215;46m'
 D=$'\e[38;5;243m'
 B=$'\e[1m'
 R=$'\e[0m'
 
 cat <<EOF
 
-${C}██████╗  ██╗   ██╗███████╗███████╗${R}
-${C}██╔══██╗ ██║   ██║╚══███╔╝╚══███╔╝${R}
-${C}██████╔╝ ██║   ██║  ███╔╝   ███╔╝ ${R}
-${C}██╔══██╗ ██║   ██║ ███╔╝   ███╔╝  ${R}
-${C}██████╔╝ ╚██████╔╝███████╗███████╗${R}
-${C}╚═════╝   ╚═════╝ ╚══════╝╚══════╝${R}
+${Y}██████╗ ██╗   ██╗███████╗███████╗██████╗  ██████╗ ██╗  ██╗${R}
+${Y}██╔══██╗██║   ██║╚══███╔╝╚══███╔╝██╔══██╗██╔═══██╗╚██╗██╔╝${R}
+${Y}██████╔╝██║   ██║  ███╔╝   ███╔╝ ██████╔╝██║   ██║ ╚███╔╝ ${R}
+${Y}██╔══██╗██║   ██║ ███╔╝   ███╔╝  ██╔══██╗██║   ██║ ██╔██╗ ${R}
+${Y}██████╔╝╚██████╔╝███████╗███████╗██████╔╝╚██████╔╝██╔╝ ██╗${R}
+${Y}╚═════╝  ╚═════╝ ╚══════╝╚══════╝╚═════╝  ╚═════╝ ╚═╝  ╚═╝${R}
 
-${D}──────────────────────────────────────────────────────────────────────${R}
+${D}──────────────────────────────────────────────────────────${R}
 ${B}Buzzbox${R}
-${D}──────────────────────────────────────────────────────────────────────${R}
+${D}──────────────────────────────────────────────────────────${R}
 
 ${B}    READY${R}
 ${D}    Buzz desktop       buzz-desktop
     Buzz relay         ws://127.0.0.1:3000
     Codex runtime      codex + codex-acp
-    Claude runtime     claude + claude-agent-acp${R}
+    Claude runtime     claude + claude-agent-acp
+    Goose runtime      goose acp${R}
 
 ${B}    FIRST BOOT${R}
 ${D}    1. Finish Buzz's local identity and community setup.
-    2. Right-click the desktop → Agent Setup and log in to Codex or Claude.
-    3. In Buzz, choose Codex or Claude Code as the agent runtime.
+    2. Right-click the desktop → Agent Setup and set up a coding agent.
+    3. In Buzz, choose Codex, Claude Code, or Goose as the agent runtime.
 
     Right-click opens the Buzzbox menu. Ctrl+Shift+T toggles tiling.${R}
 

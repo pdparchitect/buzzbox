@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-export HOME=/home/agent
+export HOME=/home/buzzbox
 export XDG_CONFIG_HOME="$HOME/.config"
 export XDG_DATA_HOME="$HOME/.local/share"
 export BUZZ_RELAY_URL="${BUZZ_RELAY_URL:-ws://127.0.0.1:3000}"
