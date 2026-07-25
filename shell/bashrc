@@ -2,7 +2,7 @@
 
 __buzzbox_ps1() {
   local exit_code=$?
-  local green='\[\e[0;32m\]'
+  local yellow='\[\e[38;2;215;215;46m\]'
   local blue='\[\e[1;34m\]'
   local cyan='\[\e[0;36m\]'
   local red='\[\e[1;31m\]'
@@ -24,7 +24,7 @@ __buzzbox_ps1() {
     git_info=" ${cyan}(${red}${branch}${cyan})"
   fi
 
-  PS1="${green}@\\u ${arrow} ${blue}\\w${git_info} ${reset}\$ "
+  PS1="${yellow}@buzzbox ${arrow} ${blue}\\w${git_info} ${reset}\$ "
 }
 
 PROMPT_COMMAND="__buzzbox_ps1"

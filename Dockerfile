@@ -6,7 +6,7 @@
 # The desktop release and relay image are pinned to the same upstream commit.
 # Buzz's current Linux desktop release is amd64-only, so this image is too.
 
-ARG BUZZ_RELAY_IMAGE=ghcr.io/block/buzz:sha-710ed9f
+ARG BUZZ_RELAY_IMAGE=ghcr.io/block/buzz:sha-0096d71
 FROM ${BUZZ_RELAY_IMAGE} AS buzz-relay
 
 FROM minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e AS minio
@@ -51,7 +51,7 @@ RUN corepack enable && corepack prepare pnpm@10.13.1 --activate && \
 
 # Coding CLIs and the ACP adapters that make them discoverable by Buzz.
 ARG CODEX_VERSION=0.145.0
-ARG CLAUDE_CODE_VERSION=2.1.219
+ARG CLAUDE_CODE_VERSION=2.1.220
 ARG CODEX_ACP_VERSION=1.1.7
 ARG CLAUDE_ACP_VERSION=0.62.0
 RUN npm install -g \
@@ -63,6 +63,21 @@ RUN npm install -g \
     claude --version && \
     codex-acp --version && \
     claude-agent-acp --version
+
+# Goose exposes ACP natively, so it does not need a separate adapter.
+ARG GOOSE_VERSION=1.44.0
+ARG GOOSE_ARCHIVE_SHA256=07febc8b4f73bdfdc3ece3d34d0e21b005f3a4f43008f95b85d6538da8f6bac1
+RUN goose_archive="/tmp/goose-${GOOSE_VERSION}.tar.gz" && \
+    curl -fsSL --retry 5 --retry-all-errors --connect-timeout 20 \
+        "https://github.com/aaif-goose/goose/releases/download/v${GOOSE_VERSION}/goose-x86_64-unknown-linux-gnu.tar.gz" \
+        -o "$goose_archive" && \
+    echo "${GOOSE_ARCHIVE_SHA256}  ${goose_archive}" | sha256sum -c - && \
+    goose_dir="$(mktemp -d)" && \
+    tar -xzf "$goose_archive" -C "$goose_dir" && \
+    install -m 0755 "$goose_dir/goose" /usr/local/bin/goose && \
+    rm -rf "$goose_dir" "$goose_archive" && \
+    goose --version && \
+    goose acp --help >/dev/null
 
 # Mike Farah yq.
 ARG YQ_VERSION=4.44.6
@@ -82,8 +97,8 @@ COPY --from=minio-client /usr/bin/mc /usr/local/bin/mc
 
 # The released Buzz desktop package includes buzz-desktop, buzz, buzz-acp,
 # buzz-agent, buzz-dev-mcp, and git-credential-nostr.
-ARG BUZZ_VERSION=0.4.24
-ARG BUZZ_DEB_SHA256=ee9e58cf92707993f24f2eed18721ece6029e0b869c71770ad4a5d6e05f820d2
+ARG BUZZ_VERSION=0.4.26
+ARG BUZZ_DEB_SHA256=1b520756ecfc28ad81981a2cd5cc6688f785f447b3f5d8d553544906f59bf521
 RUN buzz_deb="/tmp/Buzz_${BUZZ_VERSION}_amd64.deb"; \
     curl -fsSL \
         "https://github.com/block/buzz/releases/download/v${BUZZ_VERSION}/Buzz_${BUZZ_VERSION}_amd64.deb" \
@@ -169,31 +184,31 @@ RUN curl -fsSL https://dl.google.com/linux/direct/google-chrome-stable_current_a
 FROM base AS buzzbox
 
 RUN if id -u agent >/dev/null 2>&1; then \
-        :; \
+        usermod -d /home/buzzbox -m agent; \
     elif id -u ubuntu >/dev/null 2>&1; then \
-        usermod -l agent -d /home/agent -m ubuntu && groupmod -n agent ubuntu; \
+        usermod -l agent -d /home/buzzbox -m ubuntu && groupmod -n agent ubuntu; \
     else \
         groupadd --system agent && \
-        useradd --system --create-home --home-dir /home/agent \
+        useradd --system --create-home --home-dir /home/buzzbox \
             --gid agent --shell /bin/bash agent; \
     fi && \
     mkdir -p \
-        /home/agent/.vnc \
-        /home/agent/.config \
-        /home/agent/.local/share/applications \
-        /home/agent/.buzz \
-        /home/agent/.codex \
-        /home/agent/.claude \
+        /home/buzzbox/.vnc \
+        /home/buzzbox/.config \
+        /home/buzzbox/.local/share/applications \
+        /home/buzzbox/.buzz \
+        /home/buzzbox/.codex \
+        /home/buzzbox/.claude \
         /workspace \
         /var/lib/buzzbox \
         /var/log/buzzbox && \
     chown -R agent:agent \
-        /home/agent \
+        /home/buzzbox \
         /workspace \
         /var/lib/buzzbox \
         /var/log/buzzbox
 
-ENV HOME=/home/agent \
+ENV HOME=/home/buzzbox \
     BROWSER=chromium \
     BUZZ_RELAY_URL=ws://127.0.0.1:3000 \
     BUZZ_WEB_DIR=/srv/buzz/web \
@@ -201,26 +216,18 @@ ENV HOME=/home/agent \
 
 RUN echo "agent ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/agent && \
     chmod 0440 /etc/sudoers.d/agent && \
-    touch /home/agent/.sudo_as_admin_successful /home/agent/.hushlogin && \
+    touch /home/buzzbox/.sudo_as_admin_successful /home/buzzbox/.hushlogin && \
     chown agent:agent \
-        /home/agent/.sudo_as_admin_successful \
-        /home/agent/.hushlogin
+        /home/buzzbox/.sudo_as_admin_successful \
+        /home/buzzbox/.hushlogin
 
 # KasmVNC UI customisation.
 COPY kasm/custom.css /usr/share/kasmvnc/www/assets/custom.css
 COPY kasm/patch.sh /tmp/kasm-patch.sh
 RUN chmod +x /tmp/kasm-patch.sh && /tmp/kasm-patch.sh && rm /tmp/kasm-patch.sh
 
-# Keep Buzzbox's quiet desktop and remote-rendering optimisations.
-RUN wallpaper_dir=/usr/share/backgrounds/simpledesktops; \
-    mkdir -p "$wallpaper_dir"; \
-    for url in \
-        "https://static.simpledesktops.com/uploads/desktops/2020/06/28/Big_Sur_Simple.png" \
-        "https://static.simpledesktops.com/uploads/desktops/2020/06/10/Adidas_Blue.png" \
-        "https://static.simpledesktops.com/uploads/desktops/2016/12/05/Untitled-1-03-01.png" \
-        "https://static.simpledesktops.com/uploads/desktops/2016/09/01/Sunset.png"; do \
-        curl -fsSL "$url" -o "$wallpaper_dir/$(basename "$url")"; \
-    done
+# Match the Buzz website's chartreuse background and subtle dot grid.
+COPY wallpaper/buzz-grid.svg /usr/share/backgrounds/buzz-grid.svg
 
 RUN mkdir -p /etc/opt/chrome/policies/managed && \
     printf '{\n  "DefaultBrowserSettingEnabled": false,\n  "BrowserSignin": 0,\n  "HomepageLocation": "file:///opt/browser/index.html",\n  "HomepageIsNewTabPage": false,\n  "ShowHomeButton": true\n}\n' \
@@ -254,7 +261,7 @@ RUN mkdir -p /usr/share/xsessions && \
 USER agent
 
 RUN mkdir -p "$HOME/.config/cortile"
-COPY --chown=agent:agent cortile/cortile-config.toml /home/agent/.config/cortile/config.toml
+COPY --chown=agent:agent cortile/cortile-config.toml /home/buzzbox/.config/cortile/config.toml
 
 RUN printf '#!/bin/bash\nexec openbox-session\n' > "$HOME/.vnc/xstartup" && \
     chmod +x "$HOME/.vnc/xstartup" && \
@@ -269,7 +276,7 @@ RUN chmod +x /init
 
 EXPOSE 6901 3000
 WORKDIR /workspace
-VOLUME ["/workspace", "/var/lib/buzzbox", "/home/agent/.config", "/home/agent/.local/share", "/home/agent/.buzz", "/home/agent/.codex", "/home/agent/.claude"]
+VOLUME ["/workspace", "/var/lib/buzzbox", "/home/buzzbox/.config", "/home/buzzbox/.local/share", "/home/buzzbox/.buzz", "/home/buzzbox/.codex", "/home/buzzbox/.claude"]
 
 HEALTHCHECK --interval=10s --timeout=5s --start-period=60s --retries=6 \
     CMD curl -fsS http://127.0.0.1:6901/ >/dev/null && \

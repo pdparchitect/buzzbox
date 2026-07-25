@@ -11,8 +11,8 @@ work and decisions remain visible to the whole team.
 
 Buzzbox is a ready-to-run Buzz environment that opens in your web browser. One
 command starts the Buzz desktop, its local relay, storage, and supporting
-services. Codex and Claude Code are included as optional agents you can add to
-the workspace.
+services. Codex, Claude Code, and Goose are included as optional agents you can
+add to the workspace.
 
 <img width="3456" height="2234" alt="tpsmlhvh-6903 euw devtunnels ms_(MacBook Pro 16_) (1)" src="https://github.com/user-attachments/assets/2b110431-d484-4473-959d-2ca6a1dfb153" />
 
@@ -57,8 +57,8 @@ targets `linux/amd64`; ARM hosts need x86-64 container emulation.
 ## What is inside?
 
 Under the hood, Buzzbox is a browser-accessible Linux desktop with a complete
-local [Buzz](https://github.com/block/buzz) workspace. Codex and Claude Code are
-already installed and connected through their agent adapters.
+local [Buzz](https://github.com/block/buzz) workspace. Codex, Claude Code, and
+Goose are already installed with their required ACP support.
 
 One command boots:
 
@@ -66,7 +66,7 @@ One command boots:
 - a local Buzz relay at `ws://127.0.0.1:3000`;
 - PostgreSQL, Redis, and MinIO for the relay;
 - the bundled `buzz`, `buzz-acp`, `buzz-agent`, and `buzz-dev-mcp` tools;
-- Codex, Claude Code, `codex-acp`, and `claude-agent-acp`; and
+- Codex, Claude Code, Goose, `codex-acp`, and `claude-agent-acp`; and
 - the Openbox/KasmVNC desktop adapted from the Pantalk example.
 
 The environment is self-contained. It does not require a host Docker socket or
@@ -90,14 +90,15 @@ Open <http://127.0.0.1:6903>. Buzz launches automatically after the local relay
 is ready.
 
 On first boot, finish Buzz's local identity/community onboarding. Then
-right-click the desktop and open **Agent Setup** to authenticate either coding
-agent:
+right-click the desktop and open **Agent Setup** to configure a coding agent:
 
 - **Log in to Codex** runs `codex login`.
 - **Log in to Claude Code** runs `claude auth login`.
+- **Configure Goose** runs `goose configure`.
 
-Buzz discovers both ACP adapters automatically. Choose Codex or Claude Code as
-the runtime when creating or configuring an agent in Buzz.
+Buzz discovers the Codex and Claude Code ACP adapters plus Goose's native ACP
+runtime automatically. Choose Codex, Claude Code, or Goose when creating or
+configuring an agent in Buzz.
 
 Useful commands:
 
@@ -130,15 +131,16 @@ with a released client:
 
 | Component          | Version                   |
 | ------------------ | ------------------------- |
-| Buzz desktop       | `0.4.24`                  |
-| Buzz relay         | upstream commit `710ed9f` |
+| Buzz desktop       | `0.4.26`                  |
+| Buzz relay         | upstream commit `0096d71` |
 | Codex              | `0.145.0`                 |
-| Claude Code        | `2.1.219`                 |
+| Claude Code        | `2.1.220`                 |
+| Goose              | `1.44.0`                  |
 | Codex ACP adapter  | `1.1.7`                   |
 | Claude ACP adapter | `0.62.0`                  |
 
-The Buzz `.deb` is SHA-256 verified during the build. The relay and MinIO
-stages use immutable container references.
+The Buzz `.deb` and Goose CLI archive are SHA-256 verified during the build.
+The relay and MinIO stages use immutable container references.
 
 ## Persistence
 
@@ -148,7 +150,7 @@ The Makefile creates named volumes for:
 - the relay's PostgreSQL, Redis, MinIO, git, and generated-secret state;
 - Buzz desktop config and application data;
 - the Buzz agent nest at `~/.buzz`; and
-- Codex and Claude authentication/configuration.
+- Codex, Claude, and Goose authentication/configuration.
 
 `make stop` removes the container but keeps these volumes. `make recreate`
 therefore preserves identities, messages, service data, and agent logins.

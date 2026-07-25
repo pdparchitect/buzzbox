@@ -1,6 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <openbox_menu xmlns="http://openbox.org/3.4/menu">
   <menu id="root-menu" label="Buzzbox">
+    <item label="Welcome">
+      <action name="Execute">
+        <command>kitty --title "Buzzbox" --override remember_window_size=no --override initial_window_width=100c --override initial_window_height=30c -e welcome</command>
+      </action>
+    </item>
+    <separator />
     <item label="Buzz">
       <action name="Execute">
         <command>buzzbox</command>
@@ -10,11 +16,6 @@
     <item label="Terminal">
       <action name="Execute">
         <command>kitty</command>
-      </action>
-    </item>
-    <item label="Welcome">
-      <action name="Execute">
-        <command>kitty --title "Buzzbox" -e welcome</command>
       </action>
     </item>
     <item label="File Manager">
@@ -45,6 +46,11 @@
           <command>kitty --title "Claude Login" -e bash -lc "claude auth login; exec bash"</command>
         </action>
       </item>
+      <item label="Configure Goose">
+        <action name="Execute">
+          <command>kitty --title "Goose Setup" -e bash -lc "goose configure; exec bash"</command>
+        </action>
+      </item>
       <separator />
       <item label="Codex Status">
         <action name="Execute">
@@ -54,6 +60,11 @@
       <item label="Claude Status">
         <action name="Execute">
           <command>kitty --title "Claude Status" -e bash -lc "claude auth status; exec bash"</command>
+        </action>
+      </item>
+      <item label="Goose Info">
+        <action name="Execute">
+          <command>kitty --title "Goose Info" -e bash -lc "goose info; exec bash"</command>
         </action>
       </item>
     </menu>
