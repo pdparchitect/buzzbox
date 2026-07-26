@@ -14,6 +14,13 @@ command starts the Buzz desktop, its local relay, storage, and supporting
 services. Codex, Claude Code, and Goose are included as optional agents you can
 add to the workspace.
 
+> **Not an official Buzz project.** Buzzbox is an independent, community-built
+> environment that packages published Buzz releases. It is not affiliated with,
+> endorsed by, or sponsored by the Buzz project, [buzz.xyz](https://buzz.xyz),
+> or Block, Inc. "Buzz" is used here only to describe what this image runs and
+> what it is compatible with; all trademarks belong to their respective owners.
+> Report problems with Buzzbox here, not to the upstream Buzz project.
+
 <img width="3456" height="2234" alt="tpsmlhvh-6903 euw devtunnels ms_(MacBook Pro 16_) (1)" src="https://github.com/user-attachments/assets/2b110431-d484-4473-959d-2ca6a1dfb153" />
 
 ## Quick start
@@ -31,6 +38,13 @@ docker run --detach \
   --shm-size 1g \
   --publish 127.0.0.1:6903:6901 \
   --publish 127.0.0.1:3000:3000 \
+  --volume buzzbox-workspace:/workspace \
+  --volume buzzbox-services:/var/lib/buzzbox \
+  --volume buzzbox-config:/home/buzzbox/.config \
+  --volume buzzbox-data:/home/buzzbox/.local/share \
+  --volume buzzbox-nest:/home/buzzbox/.buzz \
+  --volume buzzbox-codex:/home/buzzbox/.codex \
+  --volume buzzbox-claude:/home/buzzbox/.claude \
   ghcr.io/pdparchitect/buzzbox:latest
 ```
 
@@ -45,10 +59,23 @@ podman run --detach \
   --shm-size 1g \
   --publish 127.0.0.1:6903:6901 \
   --publish 127.0.0.1:3000:3000 \
+  --volume buzzbox-workspace:/workspace \
+  --volume buzzbox-services:/var/lib/buzzbox \
+  --volume buzzbox-config:/home/buzzbox/.config \
+  --volume buzzbox-data:/home/buzzbox/.local/share \
+  --volume buzzbox-nest:/home/buzzbox/.buzz \
+  --volume buzzbox-codex:/home/buzzbox/.codex \
+  --volume buzzbox-claude:/home/buzzbox/.claude \
   ghcr.io/pdparchitect/buzzbox:latest
 ```
 
 Open <http://127.0.0.1:6903>.
+
+The named volumes are not optional. The image declares those seven paths as
+volumes, so a run without them creates anonymous volumes instead: the Buzz
+identity, relay database, media store, and agent logins are then discarded
+whenever the container is replaced, and the orphaned volumes stay on disk. See
+[Persistence](#persistence).
 
 The same image works with other OCI-compatible runtimes, including containerd
 with nerdctl. Use the same port mappings shown above. The image currently
@@ -72,6 +99,26 @@ One command boots:
 The environment is self-contained. It does not require a host Docker socket or
 a separate Compose stack.
 
+The graphical stack is about a third of the image, dominated by Chrome, Buzz
+Desktop's WebKit runtime, software GL, and fonts rather than by the desktop
+shell itself. See [IMAGE-SIZE.md](IMAGE-SIZE.md) for the measured breakdown and
+the reasoning, and run `make size-report` to reproduce it.
+
+Serving a web application instead of a desktop was considered and set aside,
+and here the case against it is stronger than in Buzznode. The relay's own web
+clients are already present at `/srv/buzz`, so the browser-only path partly
+exists — but Buzzbox is meant to run Buzz Desktop, which is a native Tauri
+application. Replacing it with a web UI would mean reimplementing the very
+client this environment exists to provide, and building a second product to
+design, secure, and maintain alongside it. It would also save less than it
+appears: WebKitGTK is Buzz Desktop's runtime, Chrome handles login flows, and
+software GL rasterises for both, so the large items stay regardless. Openbox,
+tint2, and the rest of the desktop shell add roughly 22 MiB on top of that.
+Buzzbox therefore lives off the land, surfacing the real desktop client through
+KasmVNC rather than substituting a thinner one — which also keeps it aligned
+with Buzznode, so agent behaviour developed against one desktop transfers to
+the other.
+
 ## Build locally
 
 From this directory:
@@ -89,16 +136,96 @@ make up DOCKER=podman
 Open <http://127.0.0.1:6903>. Buzz launches automatically after the local relay
 is ready.
 
+### Test with a local Buzznode
+
+Buzzbox and Buzznode are independent projects. They coordinate only through a
+named Docker network and the relay URL; neither Makefile depends on the other
+directory.
+
+Start Buzzbox from this directory:
+
+```bash
+make up \
+  BUZZ_NETWORK=buzz-local \
+  PUBLIC_RELAY_URL=ws://buzzbox:3000
+```
+
+Then, from the separate `buzznode` directory:
+
+```bash
+make up \
+  BUZZ_NETWORK=buzz-local \
+  RELAY_URL=ws://buzzbox:3000
+```
+
+Both Makefiles create `buzz-local` if it does not exist. Docker DNS resolves
+the Buzzbox container name `buzzbox` from Buzznode, so the relay does not need
+to be published on a non-loopback host interface.
+
+Open Buzzbox at <http://127.0.0.1:6903> and Buzznode at
+<http://127.0.0.1:6904>. The local Buzzbox relay does not require an API token,
+so leave Buzznode's token field empty.
+
+In Buzzbox, right-click the desktop and choose **Agent Setup → Create New Agent
+for Buzznode**. Choose the real channel, agent name, and instructions in the
+terminal. Buzzbox submits those values with `buzz agents draft-create`; review
+the prefilled owner-approval form in Buzz and choose Save. The enrollment
+window detects the newly minted identity and displays a `buzznode-v1:` bundle.
+The terminal remains open and copies the bundle to the Buzzbox desktop
+clipboard. Paste it into Buzznode's setup window, then return and press Enter.
+In an enrollment terminal, `Ctrl+C` always copies instead of interrupting the
+workflow. Other terminals copy selected text and retain the usual interrupt
+behavior when nothing is selected. After confirming the bundle has been
+pasted, the enrollment window becomes a normal Buzzbox terminal and remains
+open until you close it or type `exit`.
+
+The `nsec1...` value shown during Buzz's confirmation screen is only the agent
+private key. The enrollment bundle is the longer line beginning
+`buzznode-v1:`; it also carries the relay, authorization, and response policy.
+It preserves an external workspace relay. When the agent uses Buzzbox's bundled
+relay, the internal address is translated to `PUBLIC_RELAY_URL`, which must be
+reachable from the destination Buzznode.
+
+To relocate an agent you already created, stop its local harness and choose
+**Agent Setup → Move Existing Agent to Buzznode** instead. The bundle carries
+the selected agent's relay URL, private key, authorization tag, and response
+policy, so the node joins as that agent rather than creating another identity.
+
+The enrollment bundle is base64-encoded, not encrypted, and contains the agent
+private key. Treat it like a password. Do not restart the same agent in Buzzbox
+after its harness is running on Buzznode.
+
+Run the connection check from the Buzznode directory:
+
+```bash
+make connection-test \
+  BUZZ_NETWORK=buzz-local \
+  RELAY_URL=ws://buzzbox:3000
+```
+
+`PUBLIC_RELAY_URL` is the address Buzzbox advertises to external clients and
+uses to construct media URLs. The default remains `ws://127.0.0.1:3000` for a
+standalone Buzzbox.
+
 On first boot, finish Buzz's local identity/community onboarding. Then
 right-click the desktop and open **Agent Setup** to configure a coding agent:
 
-- **Log in to Codex** runs `codex login`.
-- **Log in to Claude Code** runs `claude auth login`.
+- **Create New Agent for Buzznode** submits a prefilled, owner-reviewed draft
+  through Buzz CLI and exports only the newly created identity.
+- **Move Existing Agent to Buzznode** exports a stopped managed agent.
+- **Sign in to Codex...** lets you choose desktop browser, device code, or API
+  key authentication.
+- **Sign in to Claude Code...** lets you choose Claude subscription, Anthropic
+  Console, long-lived setup-token, or organization SSO authentication.
 - **Configure Goose** runs `goose configure`.
 
 Buzz discovers the Codex and Claude Code ACP adapters plus Goose's native ACP
 runtime automatically. Choose Codex, Claude Code, or Goose when creating or
 configuring an agent in Buzz.
+
+Do not use `buzz-admin generate-key` for a Buzznode agent. That command only
+creates a raw Nostr keypair; it does not create the Buzz agent profile,
+ownership attestation, or channel memberships that a managed agent receives.
 
 Useful commands:
 
@@ -120,6 +247,12 @@ To change the browser port, published relay port, or desktop resolution:
 ```bash
 PORT=8080 RELAY_PORT=3001 RESOLUTION=1600x900 make up
 ```
+
+Two container-level variables are also read at boot. `BUZZBOX_STATE_DIR`
+relocates the backing-service state away from `/var/lib/buzzbox`, and
+`BUZZ_RELAY_AUTOSTART=false` starts the desktop without the bundled relay, for
+pointing Buzz Desktop at an external one. The health check skips its relay
+probe when the relay is not expected.
 
 The container still uses `ws://127.0.0.1:3000` internally. `RELAY_PORT` only
 changes the host-side published port.
@@ -186,6 +319,35 @@ environment is placed behind suitable authentication and network controls.
 Each Buzzbox instance generates stable relay, git-hook, and MinIO secrets on
 first boot and persists them in the services volume. No credentials are
 committed.
+
+### Authentication is delegated by design
+
+Access to the desktop web application is not authenticated. KasmVNC is started
+with `-disableBasicAuth` and TLS disabled, and the KasmVNC password written on
+first boot exists only because KasmVNC checks that the file is there. It is not
+an access control and should not be treated as one. The same applies to the
+local relay on port `3000`, which requires no API token or relay membership.
+
+This is a deliberate decision, and built-in authentication is not planned.
+A Buzzbox reachable beyond loopback is expected to be fronted by whichever
+access layer already suits its environment: a conventional reverse proxy, or
+preferably a zero-trust access proxy such as Cloudflare Access or an equivalent
+identity-aware proxy. Those systems already own identity, session lifetime,
+device posture, revocation, and audit, and in an enterprise deployment they are
+the layer that has to be satisfied regardless of what the box does.
+
+Adding a second mechanism inside the box would not strengthen that arrangement,
+it would compete with it: two session models to keep aligned, two places to
+revoke an operator, and an open question about which one wins when they
+disagree. Leaving the box unauthenticated keeps a single enforcement point and
+a single path forward — the proxy is the front door, and there is no second
+door to reason about or accidentally leave open.
+
+This applies to both published ports. If `PUBLIC_RELAY_URL` is used so remote
+Buzznodes can reach the relay, terminate that `wss://` endpoint at the same
+access layer rather than exposing port `3000` on its own. Until an access layer
+is in place, the loopback bind is the only boundary, and exposing Buzzbox
+without one publishes an unauthenticated root shell alongside an open relay.
 
 ## Releases
 

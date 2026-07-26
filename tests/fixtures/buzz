@@ -1,0 +1,22 @@
+#!/bin/bash
+
+set -euo pipefail
+
+case "${1:-} ${2:-}" in
+    "channels list")
+        printf '%s\n' "${BUZZ_RELAY_URL:-}" >> "$BUZZBOX_TEST_RELAY_LOG"
+        if [ "${BUZZ_RELAY_URL:-}" = "wss://team.example.com" ]; then
+            printf '%s\n' \
+                '[{"channel_id":"team-channel","name":"Team channel"}]'
+        else
+            printf '%s\n' '[]'
+        fi
+        ;;
+    "agents draft-create")
+        printf '%s\n' "${BUZZ_RELAY_URL:-}" >> "$BUZZBOX_TEST_RELAY_LOG"
+        ;;
+    *)
+        echo "Unexpected Buzz test command: $*" >&2
+        exit 1
+        ;;
+esac

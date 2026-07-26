@@ -20,7 +20,7 @@
     </item>
     <item label="File Manager">
       <action name="Execute">
-        <command>kitty -e ranger</command>
+        <command>kitty -e ranger /workspace</command>
       </action>
     </item>
     <item label="Task Manager">
@@ -36,19 +36,30 @@
     </item>
     <separator />
     <menu id="setup-menu" label="Agent Setup">
-      <item label="Log in to Codex">
+      <item label="Create New Agent for Buzznode">
         <action name="Execute">
-          <command>kitty --title "Codex Login" -e bash -lc "codex login; exec bash"</command>
+          <command>kitty --title "Create Agent for Buzznode" --override "map=ctrl+c copy_to_clipboard" --override remember_window_size=no --override initial_window_width=110c --override initial_window_height=35c -e bash -lc "buzznode-enrollment create; exec bash"</command>
         </action>
       </item>
-      <item label="Log in to Claude Code">
+      <item label="Move Existing Agent to Buzznode">
         <action name="Execute">
-          <command>kitty --title "Claude Login" -e bash -lc "claude auth login; exec bash"</command>
+          <command>kitty --title "Move Agent to Buzznode" --override "map=ctrl+c copy_to_clipboard" --override remember_window_size=no --override initial_window_width=110c --override initial_window_height=35c -e bash -lc "buzznode-enrollment; exec bash"</command>
+        </action>
+      </item>
+      <separator />
+      <item label="Sign in to Codex...">
+        <action name="Execute">
+          <command>kitty --title "Codex Login" -e bash -lc "CODEX_LOGIN_DEFAULT=browser agent-runtime-login codex; exec bash"</command>
+        </action>
+      </item>
+      <item label="Sign in to Claude Code...">
+        <action name="Execute">
+          <command>kitty --title "Claude Login" -e bash -lc "agent-runtime-login claude; exec bash"</command>
         </action>
       </item>
       <item label="Configure Goose">
         <action name="Execute">
-          <command>kitty --title "Goose Setup" -e bash -lc "goose configure; exec bash"</command>
+          <command>kitty --title "Goose Setup" -e bash -lc "agent-runtime-login goose; exec bash"</command>
         </action>
       </item>
       <separator />

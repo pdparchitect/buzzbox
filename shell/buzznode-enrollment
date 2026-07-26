@@ -1,0 +1,638 @@
+#!/bin/bash
+# Export a stopped Buzzbox managed agent for enrollment on Buzznode.
+
+set -euo pipefail
+
+data_home="${XDG_DATA_HOME:-$HOME/.local/share}"
+agent_store="${BUZZBOX_AGENT_STORE:-$data_home/xyz.block.buzz.app/agents/managed-agents.json}"
+enrollment_window_id="${BUZZNODE_ENROLLMENT_WINDOW_ID:-}"
+
+style_reset=""
+style_bold=""
+style_dim=""
+style_accent=""
+style_info=""
+style_success=""
+style_warning=""
+style_error=""
+
+if { [ -t 1 ] || [ -t 2 ] || [ "${FORCE_COLOR:-}" = "1" ]; } &&
+    { [ "${TERM:-dumb}" != "dumb" ] || [ "${FORCE_COLOR:-}" = "1" ]; } &&
+    [ -z "${NO_COLOR:-}" ]; then
+    style_reset=$'\033[0m'
+    style_bold=$'\033[1m'
+    style_dim=$'\033[2m'
+    style_accent=$'\033[38;2;215;215;46m'
+    style_info=$'\033[38;5;75m'
+    style_success=$'\033[38;5;78m'
+    style_warning=$'\033[38;5;214m'
+    style_error=$'\033[38;5;203m'
+fi
+
+print_heading() {
+    printf '\n%s%s%s%s\n' "$style_bold" "$style_accent" "$1" "$style_reset"
+    printf '%s────────────────────────────────────────────────────────────%s\n' \
+        "$style_dim" "$style_reset"
+}
+
+print_info() {
+    printf '%s→%s %s\n' "$style_info" "$style_reset" "$1"
+}
+
+print_success() {
+    printf '%s✓%s %s\n' "$style_success" "$style_reset" "$1"
+}
+
+print_warning() {
+    printf '%s!%s %s\n' "$style_warning" "$style_reset" "$1" >&2
+}
+
+print_error() {
+    printf '%s×%s %s\n' "$style_error" "$style_reset" "$1" >&2
+}
+
+usage() {
+    cat <<'EOF'
+Prepare a Buzzbox agent for Buzznode
+
+Usage:
+  buzznode-enrollment
+  buzznode-enrollment create
+  buzznode-enrollment list
+  buzznode-enrollment export [--pubkey <64-character-hex-key>]
+
+The create flow opens Buzz's managed-agent form and waits for the newly saved
+agent. Export moves an existing stopped agent. Both produce a sensitive,
+pasteable enrollment bundle containing the agent identity and authorization
+settings.
+EOF
+}
+
+require_store() {
+    if [ ! -r "$agent_store" ]; then
+        print_error "No Buzz managed-agent store was found."
+        print_info "Open Buzz, create an agent, and then run this command again." >&2
+        return 1
+    fi
+    if ! jq -e 'type == "array"' "$agent_store" >/dev/null 2>&1; then
+        print_error "Buzz managed-agent storage is not valid JSON."
+        return 1
+    fi
+}
+
+validate_relay_url() {
+    local relay_url="$1"
+    [[ "$relay_url" =~ ^wss?://[^[:space:]]+$ ]]
+}
+
+cli_agent_relay_url() {
+    local stored_relay_url="$1"
+    local relay_url="$stored_relay_url"
+
+    if [ -z "$relay_url" ]; then
+        relay_url="${BUZZ_RELAY_URL:-}"
+    fi
+    if ! validate_relay_url "$relay_url"; then
+        print_error "No usable Buzz workspace relay is available for this agent."
+        return 1
+    fi
+
+    printf '%s' "$relay_url"
+}
+
+enrollment_agent_relay_url() {
+    local preferred_relay_url="$1"
+    local inferred_relay_url=""
+    local relay_url="$preferred_relay_url"
+
+    if [ -z "$relay_url" ]; then
+        inferred_relay_url="$(
+            jq -r '
+                [
+                  .[]
+                  | (.relay_url // "")
+                  | select(test("^wss?://[^[:space:]]+$"))
+                ]
+                | unique
+                | if length == 1 then .[0] else "" end
+            ' "$agent_store"
+        )"
+        relay_url="$inferred_relay_url"
+    fi
+    if [ -z "$relay_url" ]; then
+        relay_url="${BUZZ_RELAY_URL:-}"
+    fi
+
+    if [ -n "${BUZZBOX_PUBLIC_RELAY_URL:-}" ] &&
+        [ "$relay_url" = "${BUZZ_RELAY_URL:-}" ]; then
+        relay_url="$BUZZBOX_PUBLIC_RELAY_URL"
+    fi
+
+    if ! validate_relay_url "$relay_url"; then
+        print_error "No usable Buzz relay URL is available for this agent."
+        print_info "Set PUBLIC_RELAY_URL to an address Buzznode can reach, then retry." >&2
+        return 1
+    fi
+
+    printf '%s' "$relay_url"
+}
+
+remember_enrollment_window() {
+    if [ -n "$enrollment_window_id" ] ||
+        [ -z "${DISPLAY:-}" ] ||
+        [ ! -t 1 ] ||
+        ! command -v xdotool >/dev/null 2>&1; then
+        return 0
+    fi
+
+    enrollment_window_id="$(xdotool getactivewindow 2>/dev/null || true)"
+}
+
+focus_enrollment_window() {
+    local window_hex
+
+    if [ -n "$enrollment_window_id" ] &&
+        command -v xdotool >/dev/null 2>&1 &&
+        xdotool getwindowname "$enrollment_window_id" >/dev/null 2>&1; then
+        window_hex="$(printf '0x%x' "$enrollment_window_id")"
+        wmctrl -i -r "$window_hex" -b remove,hidden >/dev/null 2>&1 || true
+        wmctrl -i -r "$window_hex" -b add,above >/dev/null 2>&1 || true
+        xdotool windowmap "$enrollment_window_id" >/dev/null 2>&1 || true
+        xdotool windowraise "$enrollment_window_id" >/dev/null 2>&1 || true
+        xdotool windowactivate --sync "$enrollment_window_id" \
+            >/dev/null 2>&1 || true
+        return 0
+    fi
+
+    if [ -n "${DISPLAY:-}" ]; then
+        wmctrl -a "Agent for Buzznode" >/dev/null 2>&1 || true
+    fi
+}
+
+release_enrollment_window() {
+    local window_hex
+
+    if [ -z "$enrollment_window_id" ]; then
+        return 0
+    fi
+    window_hex="$(printf '0x%x' "$enrollment_window_id")"
+    wmctrl -i -r "$window_hex" -b remove,above >/dev/null 2>&1 || true
+}
+
+list_agents() {
+    require_store
+    jq -r '
+        [
+          .[]
+          | select(
+              (.pubkey // "") != "" and
+              (.private_key_nsec // "") != ""
+            )
+          | [
+              (.name // "Unnamed agent"),
+              .pubkey,
+              (if ((.runtime_pid // 0) > 0) then "possibly running" else "stopped" end),
+              (.respond_to // "owner-only")
+            ]
+        ]
+        | if length == 0 then
+            "No created agents are available."
+          else
+            (["NAME", "PUBLIC KEY", "STATE", "RESPONDS TO"] | @tsv),
+            (.[] | @tsv)
+          end
+    ' "$agent_store"
+}
+
+exportable_pubkeys() {
+    jq -c '
+        [
+          .[]
+          | select(
+              (.pubkey // "") != "" and
+              (.private_key_nsec // "") != ""
+            )
+          | .pubkey
+        ]
+        | unique
+    ' "$agent_store"
+}
+
+new_exportable_pubkey() {
+    local initial_pubkeys="$1"
+
+    jq -r --argjson initial "$initial_pubkeys" '
+        first(
+          .[]
+          | select(
+              (.pubkey // "") != "" and
+              (.private_key_nsec // "") != ""
+            )
+          | .pubkey as $pubkey
+          | select(($initial | index($pubkey)) == null)
+          | $pubkey
+        ) // empty
+    ' "$agent_store"
+}
+
+available_draft_channels() {
+    local channels='[]'
+    local visible_channels
+    local provisioner
+    local provisioner_pubkey
+    local relay_url
+    local private_key
+    local auth_tag
+
+    while IFS= read -r provisioner; do
+        provisioner_pubkey="$(jq -r '.pubkey' <<<"$provisioner")"
+        relay_url="$(
+            cli_agent_relay_url \
+                "$(jq -r '.relay_url // ""' <<<"$provisioner")"
+        )" || continue
+        private_key="$(jq -r '.private_key_nsec' <<<"$provisioner")"
+        auth_tag="$(jq -r '.auth_tag' <<<"$provisioner")"
+        visible_channels="$(
+            BUZZ_RELAY_URL="$relay_url" \
+            BUZZ_PRIVATE_KEY="$private_key" \
+            BUZZ_AUTH_TAG="$auth_tag" \
+                buzz channels list --member 2>/dev/null
+        )" || continue
+        if ! jq -e 'type == "array"' >/dev/null 2>&1 <<<"$visible_channels"; then
+            continue
+        fi
+        channels="$(
+            jq -cn \
+                --argjson current "$channels" \
+                --argjson visible "$visible_channels" \
+                --arg provisioner_pubkey "$provisioner_pubkey" \
+                --arg enrollment_relay_url "$relay_url" '
+                (
+                  $current +
+                  [
+                    $visible[]
+                    | . + {
+                        provisioner_pubkey: $provisioner_pubkey,
+                        enrollment_relay_url: $enrollment_relay_url
+                      }
+                  ]
+                )
+                | unique_by(.channel_id)
+            '
+        )"
+    done < <(
+        jq -c '
+            [
+              .[]
+              | select(
+                  (.pubkey // "") != "" and
+                  (.private_key_nsec // "") != "" and
+                  (.auth_tag // "") != ""
+                )
+            ]
+            | unique_by(.pubkey)
+            | .[]
+        ' "$agent_store"
+    )
+
+    printf '%s' "$channels"
+}
+
+submit_agent_draft() {
+    local provisioner_pubkey="$1"
+    local channel_id="$2"
+    local display_name="$3"
+    local system_prompt="$4"
+    local provisioner
+    local relay_url
+    local private_key
+    local auth_tag
+
+    provisioner="$(
+        jq -ce --arg pubkey "$provisioner_pubkey" '
+            first(
+              .[]
+              | select(
+                  .pubkey == $pubkey and
+                  (.private_key_nsec // "") != "" and
+                  (.auth_tag // "") != ""
+                )
+            )
+        ' "$agent_store"
+    )"
+    relay_url="$(
+        cli_agent_relay_url \
+            "$(jq -r '.relay_url // ""' <<<"$provisioner")"
+    )"
+    private_key="$(jq -r '.private_key_nsec' <<<"$provisioner")"
+    auth_tag="$(jq -r '.auth_tag' <<<"$provisioner")"
+
+    BUZZ_RELAY_URL="$relay_url" \
+    BUZZ_PRIVATE_KEY="$private_key" \
+    BUZZ_AUTH_TAG="$auth_tag" \
+        buzz agents draft-create \
+            --channel "$channel_id" \
+            --display-name "$display_name" \
+            --system-prompt "$system_prompt" >/dev/null
+}
+
+select_pubkey() {
+    local -a pubkeys=()
+    local -a names=()
+    local choice
+    local index=1
+    local row
+
+    while IFS= read -r row; do
+        pubkeys+=("$(jq -r '.pubkey' <<<"$row")")
+        names+=("$(jq -r '.name // "Unnamed agent"' <<<"$row")")
+    done < <(
+        jq -c '
+            .[]
+            | select(
+                (.pubkey // "") != "" and
+                (.private_key_nsec // "") != ""
+              )
+        ' "$agent_store"
+    )
+
+    if [ "${#pubkeys[@]}" -eq 0 ]; then
+        print_error "No created agents are available."
+        print_info "Open Buzz, create an agent, save its displayed private key, and retry." >&2
+        return 1
+    fi
+
+    printf '%s%sChoose the stopped agent that will move to Buzznode:%s\n' \
+        "$style_bold" "$style_accent" "$style_reset" >&2
+    for choice in "${names[@]}"; do
+        printf '  %d. %s\n' "$index" "$choice" >&2
+        index=$((index + 1))
+    done
+    printf '%s%sAgent [1]: %s' \
+        "$style_bold" "$style_accent" "$style_reset" >&2
+    read -r choice
+    choice="${choice:-1}"
+    if [[ ! "$choice" =~ ^[0-9]+$ ]] ||
+        [ "$choice" -lt 1 ] ||
+        [ "$choice" -gt "${#pubkeys[@]}" ]; then
+        print_error "Unknown agent selection."
+        return 1
+    fi
+
+    printf '%s' "${pubkeys[$((choice - 1))]}"
+}
+
+create_agent() {
+    local initial_pubkeys
+    local new_pubkey=""
+    local channels
+    local channel_count
+    local channel_choice
+    local selected_channel
+    local channel_id
+    local provisioner_pubkey
+    local enrollment_relay_url=""
+    local display_name=""
+    local system_prompt
+    local default_system_prompt
+    local poll_interval="${BUZZBOX_CREATE_AGENT_POLL_INTERVAL:-2}"
+    local max_polls="${BUZZBOX_CREATE_AGENT_MAX_POLLS:-450}"
+    local attempt
+    local index
+
+    remember_enrollment_window
+    require_store
+    initial_pubkeys="$(exportable_pubkeys)"
+
+    if [ -t 1 ]; then
+        clear
+    fi
+    print_heading "Create a new managed agent for Buzznode"
+    if [ "${BUZZBOX_SKIP_CREATE_AGENT_DRAFT:-false}" != "true" ]; then
+        print_info "Loading channels from Buzz..."
+        channels="$(available_draft_channels)"
+        channel_count="$(jq 'length' <<<"$channels")"
+        if [ "$channel_count" -eq 0 ]; then
+            print_error "Buzz CLI could not find a channel through a managed owner agent."
+            print_info "Confirm in Buzz that the owner agent can see a channel and its workspace relay is reachable." >&2
+            return 1
+        fi
+
+        echo
+        printf '%sChoose the channel this agent will join:%s\n' \
+            "$style_bold" "$style_reset"
+        index=1
+        while IFS= read -r selected_channel; do
+            printf '  %d. %s\n' \
+                "$index" \
+                "$(jq -r '.name // .channel_id' <<<"$selected_channel")"
+            index=$((index + 1))
+        done < <(jq -c '.[]' <<<"$channels")
+        read -r -p "${style_bold}${style_accent}Channel [1]: ${style_reset}" \
+            channel_choice
+        channel_choice="${channel_choice:-1}"
+        if [[ ! "$channel_choice" =~ ^[0-9]+$ ]] ||
+            [ "$channel_choice" -lt 1 ] ||
+            [ "$channel_choice" -gt "$channel_count" ]; then
+            print_error "Unknown channel selection."
+            return 1
+        fi
+        selected_channel="$(jq -c ".[$((channel_choice - 1))]" <<<"$channels")"
+        channel_id="$(jq -r '.channel_id' <<<"$selected_channel")"
+        provisioner_pubkey="$(jq -r '.provisioner_pubkey' <<<"$selected_channel")"
+        enrollment_relay_url="$(
+            jq -r '.enrollment_relay_url' <<<"$selected_channel"
+        )"
+
+        while [ -z "$display_name" ]; do
+            read -r -p "${style_bold}${style_accent}Agent name: ${style_reset}" \
+                display_name
+        done
+        default_system_prompt="You are $display_name, an AI agent working with this Buzz community."
+        read -r -p "${style_bold}${style_accent}Agent instructions [$default_system_prompt]: ${style_reset}" \
+            system_prompt
+        system_prompt="${system_prompt:-$default_system_prompt}"
+
+        echo
+        print_info "Submitting an owner-reviewed agent draft through Buzz CLI..."
+        submit_agent_draft \
+            "$provisioner_pubkey" \
+            "$channel_id" \
+            "$display_name" \
+            "$system_prompt"
+        print_success "Draft submitted."
+        print_info "Review it in Buzz and choose Save."
+        print_info "Finish the confirmation screen that reveals the nsec key."
+        print_warning "That nsec is only the private key, not the enrollment bundle."
+        print_info "This terminal will return with the complete buzznode-v1 bundle."
+        echo
+        if [ -n "${DISPLAY:-}" ]; then
+            wmctrl -x -a buzz-desktop.Buzz-desktop >/dev/null 2>&1 || true
+        fi
+    else
+        print_info "Waiting for the test agent..."
+    fi
+
+    for attempt in $(seq 1 "$max_polls"); do
+        new_pubkey="$(new_exportable_pubkey "$initial_pubkeys")"
+        if [ -n "$new_pubkey" ]; then
+            break
+        fi
+        sleep "$poll_interval"
+    done
+
+    if [ -z "$new_pubkey" ]; then
+        print_error "No newly created Buzz agent was detected."
+        print_info "Run this command again, or export the agent from the existing-agent flow." >&2
+        return 1
+    fi
+
+    if [ -n "$enrollment_relay_url" ]; then
+        export_agent \
+            --pubkey "$new_pubkey" \
+            --relay-url "$enrollment_relay_url"
+    else
+        export_agent --pubkey "$new_pubkey"
+    fi
+}
+
+export_agent() {
+    local pubkey=""
+    local preferred_relay_url=""
+    local record
+    local private_key
+    local relay_url
+    local runtime_pid
+    local bundle_json
+    local bundle
+
+    remember_enrollment_window
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --pubkey)
+                pubkey="${2:-}"
+                shift 2
+                ;;
+            --relay-url)
+                preferred_relay_url="${2:-}"
+                shift 2
+                ;;
+            *)
+                print_error "Unknown export option: $1"
+                usage >&2
+                return 1
+                ;;
+        esac
+    done
+
+    require_store
+    if [ -z "$pubkey" ]; then
+        pubkey="$(select_pubkey)"
+    fi
+    if [[ ! "$pubkey" =~ ^[[:xdigit:]]{64}$ ]]; then
+        print_error "Agent public key must be 64 hexadecimal characters."
+        return 1
+    fi
+
+    record="$(
+        jq -ce --arg pubkey "$pubkey" '
+            first(
+              .[]
+              | select(
+                  .pubkey == $pubkey and
+                  (.private_key_nsec // "") != ""
+                )
+            )
+        ' "$agent_store"
+    )" || {
+        if jq -e --arg pubkey "$pubkey" \
+            'any(.[]; .pubkey == $pubkey)' "$agent_store" >/dev/null; then
+            print_error "Buzzbox cannot recover this agent's private key from its protected keyring."
+            print_info "Recreate the agent and save the nsec shown by Buzz, then use manual Buzznode setup." >&2
+        else
+            print_error "No Buzz agent has public key $pubkey."
+        fi
+        return 1
+    }
+
+    runtime_pid="$(jq -r '.runtime_pid // 0' <<<"$record")"
+    if [[ "$runtime_pid" =~ ^[0-9]+$ ]] &&
+        [ "$runtime_pid" -gt 0 ] &&
+        kill -0 "$runtime_pid" 2>/dev/null; then
+        print_error "This agent is still running in Buzzbox (process $runtime_pid)."
+        print_info "Stop it in Buzz before enrolling it on Buzznode." >&2
+        return 1
+    fi
+
+    private_key="$(jq -r '.private_key_nsec // ""' <<<"$record")"
+    if [ -z "$preferred_relay_url" ]; then
+        preferred_relay_url="$(jq -r '.relay_url // ""' <<<"$record")"
+    fi
+    relay_url="$(
+        enrollment_agent_relay_url "$preferred_relay_url"
+    )"
+    bundle_json="$(jq -c --arg relay_url "$relay_url" '{
+        version: 1,
+        name: (.name // "Buzz agent"),
+        relay_url: $relay_url,
+        private_key: .private_key_nsec,
+        auth_tag: (.auth_tag // ""),
+        respond_to: (.respond_to // "owner-only"),
+        respond_to_allowlist: (.respond_to_allowlist // [])
+    }' <<<"$record")"
+    bundle="buzznode-v1:$(printf '%s' "$bundle_json" | base64 --wrap=0)"
+
+    focus_enrollment_window
+    if [ -t 1 ]; then
+        clear
+    fi
+    print_heading "Buzznode enrollment bundle"
+    printf '%sAgent:%s %s\n' \
+        "$style_bold" "$style_reset" \
+        "$(jq -r '.name // "Buzz agent"' <<<"$record")"
+    print_warning "This bundle contains the agent private key. Treat it like a password."
+    print_info "Use the complete line beginning with buzznode-v1:."
+    echo
+    printf '%s\n' "$bundle"
+    echo
+    if [ -n "${DISPLAY:-}" ] && command -v xclip >/dev/null 2>&1; then
+        printf '%s' "$bundle" | xclip -selection clipboard
+        print_success "Copied the enrollment bundle to the desktop clipboard."
+        print_info "Paste it into Buzznode's 'Buzznode enrollment bundle' prompt."
+        if command -v xmessage >/dev/null 2>&1; then
+            xmessage -center -buttons "OK:0" \
+                "Buzznode enrollment is ready.
+
+The buzznode-v1 bundle was copied to the clipboard.
+Paste it into the Buzznode setup window." >/dev/null 2>&1 &
+        fi
+    else
+        print_info "Copy the complete buzznode-v1 line and paste it into Buzznode setup."
+    fi
+    echo
+    print_warning "After Buzznode is connected, do not restart this agent in Buzzbox."
+    if [ -t 0 ] && [ -t 1 ]; then
+        echo
+        print_success "Enrollment bundle ready."
+        read -r -p "${style_bold}${style_accent}Press Enter to continue to the Buzzbox terminal. ${style_reset}"
+    fi
+    release_enrollment_window
+}
+
+command="${1:-interactive}"
+if [ "$#" -gt 0 ]; then
+    shift
+fi
+
+case "$command" in
+    interactive) export_agent ;;
+    create) create_agent ;;
+    list) list_agents ;;
+    export) export_agent "$@" ;;
+    help|-h|--help) usage ;;
+    *)
+        print_error "Unknown command: $command"
+        usage >&2
+        exit 1
+        ;;
+esac

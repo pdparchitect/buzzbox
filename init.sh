@@ -11,6 +11,27 @@ export BUZZ_RELAY_URL="${BUZZ_RELAY_URL:-ws://127.0.0.1:3000}"
 export BUZZ_WEB_DIR="${BUZZ_WEB_DIR:-/srv/buzz/web}"
 export BUZZ_ADMIN_WEB_DIR="${BUZZ_ADMIN_WEB_DIR:-/srv/buzz/admin-web}"
 
+public_relay_url="${BUZZBOX_PUBLIC_RELAY_URL:-$BUZZ_RELAY_URL}"
+if ! node -e '
+    const url = new URL(process.argv[1]);
+    if (url.protocol !== "ws:" && url.protocol !== "wss:") process.exit(1);
+' "$public_relay_url"; then
+    echo "[buzzbox] invalid BUZZBOX_PUBLIC_RELAY_URL: $public_relay_url" >&2
+    exit 1
+fi
+
+public_media_base_url="$(node -e '
+    const url = new URL(process.argv[1]);
+    url.protocol = url.protocol === "wss:" ? "https:" : "http:";
+    process.stdout.write(`${url.origin}/media`);
+' "$public_relay_url")"
+public_relay_domain="$(node -e '
+    process.stdout.write(new URL(process.argv[1]).hostname);
+' "$public_relay_url")"
+printf -v public_relay_url_q '%q' "$public_relay_url"
+printf -v public_media_base_url_q '%q' "$public_media_base_url"
+printf -v public_relay_domain_q '%q' "$public_relay_domain"
+
 agent_uid="$(id -u agent)"
 export XDG_RUNTIME_DIR="/run/user/${agent_uid}"
 
@@ -47,17 +68,46 @@ mkdir -p \
     /var/log/buzzbox \
     /tmp/.X11-unix
 
-chown -R agent:agent \
-    "$HOME/.vnc" \
-    "$HOME/.config" \
-    "$HOME/.local/share" \
-    "$HOME/.buzz" \
-    "$HOME/.codex" \
-    "$HOME/.claude" \
+# Keep the durable workspace and the agent's home available as Ranger
+# bookmarks without replacing any bookmarks the user has already assigned.
+ranger_data_dir="$XDG_DATA_HOME/ranger"
+ranger_bookmarks="$ranger_data_dir/bookmarks"
+mkdir -p "$ranger_data_dir"
+touch "$ranger_bookmarks"
+if ! grep -q '^W:' "$ranger_bookmarks"; then
+    printf 'W:/workspace\n' >> "$ranger_bookmarks"
+fi
+if ! grep -q '^H:' "$ranger_bookmarks"; then
+    printf 'H:%s\n' "$HOME" >> "$ranger_bookmarks"
+fi
+
+# Ownership only needs normalizing once per volume lifetime. Recursing these
+# paths on every boot walks the whole workspace, the PostgreSQL cluster, and the
+# MinIO object store, which becomes minutes of startup latency once they hold
+# real data. Anything created later is created by the agent user already.
+persistent_paths=(
+    "$HOME/.config"
+    "$HOME/.local/share"
+    "$HOME/.buzz"
+    "$HOME/.codex"
+    "$HOME/.claude"
+    "$state_dir"
+    /workspace
+)
+ownership_stamp="$state_dir/.ownership-normalized"
+
+chown agent:agent \
+    "${persistent_paths[@]}" \
     "$XDG_RUNTIME_DIR" \
-    "$state_dir" \
-    /workspace \
     /var/log/buzzbox
+
+if [ ! -e "$ownership_stamp" ]; then
+    chown -R agent:agent "${persistent_paths[@]}" /var/log/buzzbox
+    touch "$ownership_stamp"
+    chown agent:agent "$ownership_stamp"
+    echo "[buzzbox] normalized ownership of the persistent volumes"
+fi
+
 chmod 700 "$XDG_RUNTIME_DIR" "$secrets_dir"
 chmod 1777 /tmp/.X11-unix
 
@@ -86,13 +136,37 @@ export BUZZ_S3_ACCESS_KEY="$MINIO_ROOT_USER"
 export BUZZ_S3_SECRET_KEY="$MINIO_ROOT_PASSWORD"
 export BUZZ_S3_BUCKET="${BUZZ_S3_BUCKET:-buzz-media}"
 
-# Use a GPU when the host exposes one; otherwise keep software rendering.
+# Every value interpolated into a `su -c` string is quoted the same way the
+# relay URLs above are. Most of these can be supplied through the environment,
+# so an unquoted space or quote character in one would otherwise break out of
+# the command being built rather than fail cleanly.
+printf -v postgres_dir_q '%q' "$postgres_dir"
+printf -v redis_dir_q '%q' "$redis_dir"
+printf -v minio_dir_q '%q' "$minio_dir"
+printf -v git_dir_q '%q' "$git_dir"
+printf -v s3_access_key_q '%q' "$BUZZ_S3_ACCESS_KEY"
+printf -v s3_secret_key_q '%q' "$BUZZ_S3_SECRET_KEY"
+printf -v s3_bucket_q '%q' "$BUZZ_S3_BUCKET"
+printf -v relay_private_key_q '%q' "$BUZZ_RELAY_PRIVATE_KEY"
+printf -v git_hook_secret_q '%q' "$BUZZ_GIT_HOOK_HMAC_SECRET"
+printf -v buzz_web_dir_q '%q' "$BUZZ_WEB_DIR"
+printf -v buzz_admin_web_dir_q '%q' "$BUZZ_ADMIN_WEB_DIR"
+
+# Use a GPU only when the host exposes a render node *and* the desktop user can
+# open it; otherwise keep software rendering. A passed-through node is normally
+# root:render 0660 and the host's render group does not exist in this image, so
+# presence alone does not mean usable. Announcing hw3d in that case leaves Xvnc
+# and Chrome retrying against a device they cannot open.
 gpu_node=""
+gpu_node_blocked=""
 for node in /dev/dri/renderD*; do
-    if [ -e "$node" ]; then
+    [ -e "$node" ] || continue
+    printf -v node_q '%q' "$node"
+    if su -s /bin/bash -c "test -r $node_q && test -w $node_q" agent; then
         gpu_node="$node"
         break
     fi
+    gpu_node_blocked="$node"
 done
 
 if [ -n "$gpu_node" ]; then
@@ -103,7 +177,12 @@ if [ -n "$gpu_node" ]; then
 else
     gpu_config="  gpu:
     hw3d: false"
-    echo "[buzzbox] no GPU render node found; using software rendering"
+    if [ -n "$gpu_node_blocked" ]; then
+        echo "[buzzbox] $gpu_node_blocked is not readable by the agent user;" \
+            "using software rendering"
+    else
+        echo "[buzzbox] no GPU render node found; using software rendering"
+    fi
 fi
 
 cat > "$HOME/.vnc/kasmvnc.yaml" <<YAML
@@ -158,17 +237,36 @@ su -s /bin/bash -c '
 ' agent
 
 pg_bindir="$(pg_config --bindir)"
+printf -v pg_bindir_q '%q' "$pg_bindir"
+printf -v pg_options_q '%q' "-h 127.0.0.1 -p 5432 -k $postgres_dir"
+
+# shellcheck disable=SC2329
+cleanup() {
+    echo "[buzzbox] stopping"
+    su -s /bin/bash -c 'kasmvncserver -kill :1 >/dev/null 2>&1 || true' agent
+    pkill -TERM -u agent -f '(^|/)buzz-desktop($| )' 2>/dev/null || true
+    pkill -TERM -u agent buzz-relay 2>/dev/null || true
+    pkill -TERM -u agent minio 2>/dev/null || true
+    pkill -TERM -u agent redis-server 2>/dev/null || true
+    su -s /bin/bash -c \
+        "$pg_bindir_q/pg_ctl -D $postgres_dir_q stop -m fast >/dev/null 2>&1 || true" \
+        agent
+}
+
+# Installed before the first service starts so a stop during startup still
+# shuts PostgreSQL down cleanly. Every step is already idempotent.
+trap cleanup EXIT INT TERM
 
 if [ ! -s "$postgres_dir/PG_VERSION" ]; then
     su -s /bin/bash -c \
-        "'$pg_bindir/initdb' -D '$postgres_dir' -U buzz --auth-local=trust --auth-host=trust" \
+        "$pg_bindir_q/initdb -D $postgres_dir_q -U buzz --auth-local=trust --auth-host=trust" \
         agent >/var/log/buzzbox/postgres-init.log 2>&1
     echo "[buzzbox] initialized PostgreSQL"
 fi
 
 su -s /bin/bash -c \
-    "'$pg_bindir/pg_ctl' -D '$postgres_dir' -l /var/log/buzzbox/postgres.log \
-        -o '-h 127.0.0.1 -p 5432 -k $postgres_dir' start" \
+    "$pg_bindir_q/pg_ctl -D $postgres_dir_q -l /var/log/buzzbox/postgres.log \
+        -o $pg_options_q start" \
     agent >/dev/null
 
 for attempt in $(seq 1 40); do
@@ -194,7 +292,7 @@ su -s /bin/bash -c "
         --bind 127.0.0.1 \
         --port 6379 \
         --protected-mode yes \
-        --dir '$redis_dir' \
+        --dir $redis_dir_q \
         --appendonly yes \
         --logfile /var/log/buzzbox/redis.log
 " agent &
@@ -213,9 +311,9 @@ done
 echo "[buzzbox] Redis ready"
 
 su -s /bin/bash -c "
-    export MINIO_ROOT_USER='$MINIO_ROOT_USER'
-    export MINIO_ROOT_PASSWORD='$MINIO_ROOT_PASSWORD'
-    exec minio server '$minio_dir' \
+    export MINIO_ROOT_USER=$s3_access_key_q
+    export MINIO_ROOT_PASSWORD=$s3_secret_key_q
+    exec minio server $minio_dir_q \
         --address 127.0.0.1:9000 \
         --console-address 127.0.0.1:9001
 " agent >>/var/log/buzzbox/minio.log 2>&1 &
@@ -238,45 +336,31 @@ mc mb --ignore-existing "buzzbox/$BUZZ_S3_BUCKET" >/dev/null
 mc anonymous set none "buzzbox/$BUZZ_S3_BUCKET" >/dev/null
 echo "[buzzbox] MinIO ready"
 
-# shellcheck disable=SC2329
-cleanup() {
-    echo "[buzzbox] stopping"
-    su -s /bin/bash -c 'kasmvncserver -kill :1 >/dev/null 2>&1 || true' agent
-    pkill -TERM -u agent -f '(^|/)buzz-desktop($| )' 2>/dev/null || true
-    pkill -TERM -u agent buzz-relay 2>/dev/null || true
-    pkill -TERM -u agent minio 2>/dev/null || true
-    pkill -TERM -u agent redis-server 2>/dev/null || true
-    su -s /bin/bash -c \
-        "'$pg_bindir/pg_ctl' -D '$postgres_dir' stop -m fast >/dev/null 2>&1 || true" \
-        agent
-}
-trap cleanup EXIT INT TERM
-
 if [ "${BUZZ_RELAY_AUTOSTART:-true}" = "true" ]; then
     su -s /bin/bash -c "
         export HOME='$HOME'
         export DATABASE_URL='postgres://buzz@127.0.0.1:5432/buzz'
         export REDIS_URL='redis://127.0.0.1:6379'
-        export RELAY_URL='$BUZZ_RELAY_URL'
+        export RELAY_URL=$public_relay_url_q
         export BUZZ_BIND_ADDR='0.0.0.0:3000'
         export BUZZ_HEALTH_PORT='8080'
         export BUZZ_METRICS_PORT='9102'
-        export BUZZ_RELAY_PRIVATE_KEY='$BUZZ_RELAY_PRIVATE_KEY'
-        export BUZZ_GIT_HOOK_HMAC_SECRET='$BUZZ_GIT_HOOK_HMAC_SECRET'
+        export BUZZ_RELAY_PRIVATE_KEY=$relay_private_key_q
+        export BUZZ_GIT_HOOK_HMAC_SECRET=$git_hook_secret_q
         export BUZZ_S3_ENDPOINT='http://127.0.0.1:9000'
-        export BUZZ_S3_ACCESS_KEY='$BUZZ_S3_ACCESS_KEY'
-        export BUZZ_S3_SECRET_KEY='$BUZZ_S3_SECRET_KEY'
-        export BUZZ_S3_BUCKET='$BUZZ_S3_BUCKET'
-        export BUZZ_MEDIA_BASE_URL='http://127.0.0.1:3000/media'
-        export BUZZ_MEDIA_SERVER_DOMAIN='127.0.0.1'
-        export BUZZ_GIT_REPO_PATH='$git_dir'
+        export BUZZ_S3_ACCESS_KEY=$s3_access_key_q
+        export BUZZ_S3_SECRET_KEY=$s3_secret_key_q
+        export BUZZ_S3_BUCKET=$s3_bucket_q
+        export BUZZ_MEDIA_BASE_URL=$public_media_base_url_q
+        export BUZZ_MEDIA_SERVER_DOMAIN=$public_relay_domain_q
+        export BUZZ_GIT_REPO_PATH=$git_dir_q
         export BUZZ_AUTO_MIGRATE='true'
         export BUZZ_GIT_CONFORMANCE_PROBE='false'
         export BUZZ_REQUIRE_AUTH_TOKEN='false'
         export BUZZ_REQUIRE_RELAY_MEMBERSHIP='false'
         export BUZZ_ALLOW_NIP_OA_AUTH='true'
-        export BUZZ_WEB_DIR='$BUZZ_WEB_DIR'
-        export BUZZ_ADMIN_WEB_DIR='$BUZZ_ADMIN_WEB_DIR'
+        export BUZZ_WEB_DIR=$buzz_web_dir_q
+        export BUZZ_ADMIN_WEB_DIR=$buzz_admin_web_dir_q
         export RUST_LOG='buzz_relay=info,buzz_db=info,buzz_auth=info'
         exec buzz-relay
     " agent >>/var/log/buzzbox/buzz-relay.log 2>&1 &
@@ -293,6 +377,7 @@ if [ "${BUZZ_RELAY_AUTOSTART:-true}" = "true" ]; then
         sleep 1
     done
     echo "[buzzbox] Buzz relay ready at $BUZZ_RELAY_URL"
+    echo "[buzzbox] external relay URL: $public_relay_url"
 fi
 
 su -s /bin/bash -c 'kasmvncserver -kill :1 >/dev/null 2>&1 || true' agent
