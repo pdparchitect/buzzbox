@@ -1,5 +1,13 @@
 name: CI
 
+# Building and smoke-testing the image costs many minutes, so prose-only
+# changes skip it. The ignore list is deliberately explicit rather than a
+# `*.md` glob: VERSION and CHANGELOG.md must keep triggering CI. They are the
+# release intent, a release commit usually touches nothing else, and
+# tag-release.yaml only fires after a successful CI run on main.
+#
+# This is an ignore list, not a `paths` allowlist, so that a new directory
+# nobody remembered to register still gets built and tested.
 on:
   push:
     branches:
@@ -7,10 +15,20 @@ on:
       - next
     tags-ignore:
       - 'v*'
+    paths-ignore:
+      - 'README.md'
+      - 'RELEASES.md'
+      - 'IMAGE-SIZE.md'
+      - '.gitignore'
   pull_request:
     branches:
       - main
       - next
+    paths-ignore:
+      - 'README.md'
+      - 'RELEASES.md'
+      - 'IMAGE-SIZE.md'
+      - '.gitignore'
 
 permissions:
   contents: read
@@ -39,6 +57,12 @@ jobs:
             echo "CHANGELOG.md has no section for $VERSION" >&2
             exit 1
           fi
+
+      # Seconds, and needs no Docker. Running it before the build means a typo
+      # in a shell script or a Makefile pin that drifted from the Dockerfile
+      # fails here instead of after a full image build.
+      - name: Validate scripts and pinned metadata
+        run: make check
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -93,7 +117,7 @@ jobs:
 
           docker exec "$container" bash -ec '
             for command in buzz-desktop buzz buzz-acp buzz-agent buzz-relay \
-              codex codex-acp claude claude-agent-acp; do
+              codex codex-acp claude claude-agent-acp goose; do
               command -v "$command" >/dev/null
             done
             redis-cli ping | grep -q PONG

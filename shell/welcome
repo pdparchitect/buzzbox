@@ -33,7 +33,11 @@ ${D}    1. Finish Buzz's local identity and community setup.
     2. Right-click the desktop → Agent Setup and set up a coding agent.
     3. In Buzz, choose Codex, Claude Code, or Goose as the agent runtime.
 
-    Right-click opens the Buzzbox menu. Ctrl+Shift+T toggles tiling.${R}
+    Creating a dedicated Buzznode agent?
+    Run: buzznode-enrollment create
+
+    Right-click opens the Buzzbox menu. Ctrl+Shift+T toggles tiling.
+    File Manager opens /workspace. Press 'W for Workspace or 'H for Home.${R}
 
 EOF
 

@@ -32,6 +32,8 @@ url_color #5599ff
 cursor_shape block
 shell_integration no-cursor
 confirm_os_window_close 0
+map ctrl+c copy_or_interrupt
+map ctrl+v paste_from_clipboard
 window_padding_width 8
 repaint_delay 40
 input_delay 8

@@ -125,11 +125,21 @@ RUN ln -sf /usr/bin/ipython3 /usr/bin/ipython && \
 # ═══════════════════════════════════════════════════════════════════
 FROM core AS base
 
+# KasmVNC supplies its own X server (Xvnc), so the `xorg` metapackage is not
+# installed: it would add xserver-xorg-core, input/video drivers, keyboard-
+# configuration, and udev/systemd for hardware this container never has.
+# `x11-xserver-utils` is skipped for the same reason - its only consumer would
+# be the xrdb call in KasmVNC's generated xstartup, and xstartup is replaced
+# below with `exec openbox-session`. Together they cost ~90 MiB.
+# xauth, xkb-data, and x11-xkb-utils are listed explicitly even though
+# kasmvncserver depends on them, so an autoremove can never take them out.
+# xfonts-base supplies the core font path Xvnc is started with.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     xdg-utils ssl-cert \
-    xorg xterm dbus-x11 x11-xserver-utils x11-utils \
+    xauth xkb-data x11-xkb-utils xfonts-base \
+    xterm dbus-x11 x11-utils \
     scrot \
-    openbox obconf tint2 kitty ranger feh picom htop xdotool wmctrl \
+    openbox obconf tint2 kitty ranger feh picom htop xdotool wmctrl xclip \
     fonts-noto fonts-noto-color-emoji \
     libnss3 libatk1.0-0t64 libatk-bridge2.0-0t64 libcups2t64 libdrm2 \
     libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 \
@@ -223,6 +233,7 @@ RUN echo "agent ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/agent && \
 
 # KasmVNC UI customisation.
 COPY kasm/custom.css /usr/share/kasmvnc/www/assets/custom.css
+COPY kasm/favicon.svg /usr/share/kasmvnc/www/assets/favicon.svg
 COPY kasm/patch.sh /tmp/kasm-patch.sh
 RUN chmod +x /tmp/kasm-patch.sh && /tmp/kasm-patch.sh && rm /tmp/kasm-patch.sh
 
@@ -241,6 +252,8 @@ COPY cortile/cortilectl /usr/local/bin/cortilectl
 COPY shell/welcome /usr/local/bin/welcome
 COPY shell/chromium /usr/local/bin/chromium
 COPY shell/buzzbox /usr/local/bin/buzzbox
+COPY shell/buzznode-enrollment /usr/local/bin/buzznode-enrollment
+COPY shell/agent-runtime-login /usr/local/bin/agent-runtime-login
 RUN mkdir -p /etc/bash.bashrc.d
 COPY shell/bashrc /etc/bash.bashrc.d/buzzbox-prompt.sh
 COPY browser /opt/browser
@@ -250,7 +263,9 @@ RUN chmod +x \
         /usr/local/bin/cortilectl \
         /usr/local/bin/welcome \
         /usr/local/bin/chromium \
-        /usr/local/bin/buzzbox && \
+        /usr/local/bin/buzzbox \
+        /usr/local/bin/buzznode-enrollment \
+        /usr/local/bin/agent-runtime-login && \
     echo '[ -d /etc/bash.bashrc.d ] && for f in /etc/bash.bashrc.d/*.sh; do . "$f"; done' \
         >> /etc/bash.bashrc
 
@@ -278,8 +293,12 @@ EXPOSE 6901 3000
 WORKDIR /workspace
 VOLUME ["/workspace", "/var/lib/buzzbox", "/home/buzzbox/.config", "/home/buzzbox/.local/share", "/home/buzzbox/.buzz", "/home/buzzbox/.codex", "/home/buzzbox/.claude"]
 
+# The relay probe only applies when the relay is expected. Disabling the relay
+# with BUZZ_RELAY_AUTOSTART is a supported configuration, and probing 8080
+# unconditionally would hold such a container unhealthy forever.
 HEALTHCHECK --interval=10s --timeout=5s --start-period=60s --retries=6 \
     CMD curl -fsS http://127.0.0.1:6901/ >/dev/null && \
-        curl -fsS http://127.0.0.1:8080/_readiness >/dev/null || exit 1
+        { [ "${BUZZ_RELAY_AUTOSTART:-true}" != "true" ] || \
+          curl -fsS http://127.0.0.1:8080/_readiness >/dev/null; } || exit 1
 
 ENTRYPOINT ["/init"]

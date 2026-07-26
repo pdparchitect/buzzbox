@@ -17,13 +17,20 @@ GOOSE_ARCHIVE_SHA256 ?= 07febc8b4f73bdfdc3ece3d34d0e21b005f3a4f43008f95b85d6538d
 BIND_ADDRESS ?= 127.0.0.1
 PORT ?= 6903
 RELAY_PORT ?= 3000
+BUZZ_NETWORK ?=
+PUBLIC_RELAY_URL ?=
 RESOLUTION ?= 1920x1080
 VNC_STATS ?= false
 VOLUME_PREFIX ?= buzzbox
 
-GPU_DEVICE := $(shell test -d /dev/dri && echo --device=/dev/dri)
+# Pass render nodes only. `--device=/dev/dri` would also hand over card*, the
+# DRM master/modesetting node, which nothing in this container has a use for.
+GPU_DEVICE := $(shell for node in /dev/dri/renderD*; do \
+	[ -e "$$node" ] && echo "--device=$$node"; done)
+NETWORK_ARG := $(if $(strip $(BUZZ_NETWORK)),--network "$(BUZZ_NETWORK)",)
+PUBLIC_RELAY_ENV := $(if $(strip $(PUBLIC_RELAY_URL)),--env "BUZZBOX_PUBLIC_RELAY_URL=$(PUBLIC_RELAY_URL)",)
 
-.PHONY: help check build run recreate up test smoke stop logs relay-log vnc-log status url
+.PHONY: help check build network run recreate up test smoke stop logs relay-log vnc-log status url size-report
 
 help:
 	@echo "Buzzbox local Docker workflow"
@@ -41,12 +48,18 @@ help:
 	@echo "  make status     Show container and health status"
 	@echo "  make stop       Stop and remove the container"
 	@echo "  make url        Print the local desktop and relay URLs"
+	@echo "  make size-report  Report the graphical stack's share of the image"
 	@echo
 	@echo "Overrides: PORT=8080 RELAY_PORT=3001 RESOLUTION=1600x900"
-	@echo "           VNC_STATS=true"
+	@echo "           BUZZ_NETWORK=buzz-local"
+	@echo "           PUBLIC_RELAY_URL=ws://buzzbox:3000 VNC_STATS=true"
 
 check:
-	bash -n init.sh openbox/autostart shell/buzzbox shell/chromium shell/welcome
+	bash -n init.sh openbox/autostart shell/buzzbox shell/chromium shell/welcome \
+		shell/agent-runtime-login shell/buzznode-enrollment \
+		tests/test-agent-runtime-login.sh tests/test-buzznode-enrollment.sh
+	bash tests/test-agent-runtime-login.sh
+	bash tests/test-buzznode-enrollment.sh
 	@grep -q "^ARG BUZZ_VERSION=$(BUZZ_VERSION)$$" Dockerfile
 	@grep -q "^ARG BUZZ_DEB_SHA256=$(BUZZ_DEB_SHA256)$$" Dockerfile
 	@grep -q "^ARG BUZZ_RELAY_IMAGE=$(BUZZ_RELAY_IMAGE)$$" Dockerfile
@@ -56,6 +69,8 @@ check:
 	@grep -q "^ARG CLAUDE_ACP_VERSION=$(CLAUDE_ACP_VERSION)$$" Dockerfile
 	@grep -q "^ARG GOOSE_VERSION=$(GOOSE_VERSION)$$" Dockerfile
 	@grep -q "^ARG GOOSE_ARCHIVE_SHA256=$(GOOSE_ARCHIVE_SHA256)$$" Dockerfile
+	@grep -q 'assets/favicon.svg' kasm/patch.sh
+	@grep -q 'COPY kasm/favicon.svg /usr/share/kasmvnc/www/assets/favicon.svg' Dockerfile
 	@echo "Buzzbox metadata and shell syntax are valid."
 
 build:
@@ -74,7 +89,15 @@ build:
 		--tag "$(IMAGE)" \
 		.
 
-run:
+network:
+	@if [ -n "$(strip $(BUZZ_NETWORK))" ]; then \
+		if ! $(DOCKER) network inspect "$(BUZZ_NETWORK)" >/dev/null 2>&1; then \
+			$(DOCKER) network create "$(BUZZ_NETWORK)" >/dev/null; \
+			echo "Created Docker network $(BUZZ_NETWORK)."; \
+		fi; \
+	fi
+
+run: network
 	@if $(DOCKER) container inspect "$(CONTAINER)" >/dev/null 2>&1; then \
 		if [ "$$($(DOCKER) container inspect --format '{{.State.Running}}' "$(CONTAINER)")" = "true" ]; then \
 			echo "Container $(CONTAINER) is already running."; \
@@ -88,8 +111,10 @@ run:
 			--restart unless-stopped \
 			--shm-size 1g \
 			$(GPU_DEVICE) \
+			$(NETWORK_ARG) \
 			--publish "$(BIND_ADDRESS):$(PORT):6901" \
 			--publish "$(BIND_ADDRESS):$(RELAY_PORT):3000" \
+			$(PUBLIC_RELAY_ENV) \
 			--env "BUZZBOX_RESOLUTION=$(RESOLUTION)" \
 			--env "BUZZBOX_VNC_STATS=$(VNC_STATS)" \
 			--volume "$(VOLUME_PREFIX)-workspace:/workspace" \
@@ -129,8 +154,8 @@ smoke:
 		exit 1; \
 	fi
 	@$(DOCKER) exec "$(CONTAINER)" bash -ec '\
-		for command in buzz-desktop buzz buzz-acp buzz-agent buzz-relay \
-			codex codex-acp claude claude-agent-acp goose; do \
+		for command in agent-runtime-login buzz-desktop buzz buzz-acp buzz-agent buzz-relay \
+			buzznode-enrollment codex codex-acp claude claude-agent-acp goose; do \
 			command -v "$$command" >/dev/null; \
 		done; \
 		redis-cli ping | grep -q PONG; \
@@ -166,3 +191,6 @@ status:
 url:
 	@echo "Desktop: http://$(BIND_ADDRESS):$(PORT)"
 	@echo "Relay:   ws://$(BIND_ADDRESS):$(RELAY_PORT)"
+
+size-report:
+	@DOCKER="$(DOCKER)" bash tools/size-report.sh "$(IMAGE)"
