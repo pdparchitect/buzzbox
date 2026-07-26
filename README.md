@@ -14,6 +14,13 @@ command starts the Buzz desktop, its local relay, storage, and supporting
 services. Codex, Claude Code, and Goose are included as optional agents you can
 add to the workspace.
 
+Agents can also live outside the box.
+[Buzznode](https://github.com/pdparchitect/buzznode) is the companion project: a
+persistent Linux computer for a single agent, with its own browser, terminal,
+and filesystem, joining this or any other Buzz workspace over its relay.
+Buzzbox's Agent Setup menu creates agents for it and hands over the enrollment
+bundle, but Buzznode does not require Buzzbox to run.
+
 > **Not an official Buzz project.** Buzzbox is an independent, community-built
 > environment that packages published Buzz releases. It is not affiliated with,
 > endorsed by, or sponsored by the Buzz project, [buzz.xyz](https://buzz.xyz),
@@ -21,16 +28,14 @@ add to the workspace.
 > what it is compatible with; all trademarks belong to their respective owners.
 > Report problems with Buzzbox here, not to the upstream Buzz project.
 
-<img width="3456" height="2234" alt="tpsmlhvh-6903 euw devtunnels ms_(MacBook Pro 16_) (1)" src="https://github.com/user-attachments/assets/2b110431-d484-4473-959d-2ca6a1dfb153" />
+<img width="3456" height="2234" alt="tpsmlhvh-6903 euw devtunnels ms_(MacBook Pro 16_) (3)" src="https://github.com/user-attachments/assets/5e6391fc-5d43-4986-bedd-f54c47a0dd8e" />
 
 ## Quick start
 
-Buzzbox is published as a complete image on GitHub Container Registry.
-
-With Docker:
+Buzzbox is published as a complete image on GitHub Container Registry. One
+command starts the whole workspace:
 
 ```bash
-docker pull ghcr.io/pdparchitect/buzzbox:latest
 docker run --detach \
   --name buzzbox \
   --platform linux/amd64 \
@@ -48,38 +53,19 @@ docker run --detach \
   ghcr.io/pdparchitect/buzzbox:latest
 ```
 
-With Podman:
+Open <http://127.0.0.1:6903>. Buzz launches automatically once the local relay
+is ready.
 
-```bash
-podman pull ghcr.io/pdparchitect/buzzbox:latest
-podman run --detach \
-  --name buzzbox \
-  --platform linux/amd64 \
-  --restart unless-stopped \
-  --shm-size 1g \
-  --publish 127.0.0.1:6903:6901 \
-  --publish 127.0.0.1:3000:3000 \
-  --volume buzzbox-workspace:/workspace \
-  --volume buzzbox-services:/var/lib/buzzbox \
-  --volume buzzbox-config:/home/buzzbox/.config \
-  --volume buzzbox-data:/home/buzzbox/.local/share \
-  --volume buzzbox-nest:/home/buzzbox/.buzz \
-  --volume buzzbox-codex:/home/buzzbox/.codex \
-  --volume buzzbox-claude:/home/buzzbox/.claude \
-  ghcr.io/pdparchitect/buzzbox:latest
-```
-
-Open <http://127.0.0.1:6903>.
-
-The named volumes are not optional. The image declares those seven paths as
-volumes, so a run without them creates anonymous volumes instead: the Buzz
-identity, relay database, media store, and agent logins are then discarded
-whenever the container is replaced, and the orphaned volumes stay on disk. See
+Keep the named volumes. The image declares those seven paths as volumes, so a
+run without them creates anonymous volumes instead: the Buzz identity, relay
+database, media store, and agent logins are discarded whenever the container is
+replaced, and the orphaned volumes stay on disk. See
 [Persistence](#persistence).
 
-The same image works with other OCI-compatible runtimes, including containerd
-with nerdctl. Use the same port mappings shown above. The image currently
-targets `linux/amd64`; ARM hosts need x86-64 container emulation.
+For Podman, run the same command with `podman` in place of `docker`. The image
+also works with other OCI-compatible runtimes, including containerd with
+nerdctl, using the port mappings above. It targets `linux/amd64`; ARM hosts need
+x86-64 container emulation.
 
 ## What is inside?
 
@@ -138,11 +124,11 @@ is ready.
 
 ### Test with a local Buzznode
 
-Buzzbox and Buzznode are independent projects. They coordinate only through a
-named Docker network and the relay URL; neither Makefile depends on the other
-directory.
+Buzzbox and [Buzznode](https://github.com/pdparchitect/buzznode) are independent
+projects. They coordinate only through a named Docker network and the relay URL;
+neither Makefile depends on the other directory.
 
-Start Buzzbox from this directory:
+Clone Buzznode next to this repository, then start Buzzbox from this directory:
 
 ```bash
 make up \
