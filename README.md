@@ -16,7 +16,7 @@ add to the workspace.
 
 Agents can also live outside the box.
 [Buzznode](https://github.com/pdparchitect/buzznode) is the companion project: a
-persistent Linux computer for a single agent, with its own browser, terminal,
+persistent computer for a single agent, with its own browser, terminal,
 and filesystem, joining this or any other Buzz workspace over its relay.
 Buzzbox's Agent Setup menu creates agents for it and hands over the enrollment
 bundle, but Buzznode does not require Buzzbox to run.
@@ -38,7 +38,6 @@ command starts the whole workspace:
 ```bash
 docker run --detach \
   --name buzzbox \
-  --platform linux/amd64 \
   --restart unless-stopped \
   --shm-size 1g \
   --publish 127.0.0.1:6903:6901 \
@@ -64,8 +63,9 @@ replaced, and the orphaned volumes stay on disk. See
 
 For Podman, run the same command with `podman` in place of `docker`. The image
 also works with other OCI-compatible runtimes, including containerd with
-nerdctl, using the port mappings above. It targets `linux/amd64`; ARM hosts need
-x86-64 container emulation.
+nerdctl, using the port mappings above. Release tags contain native
+`linux/amd64` and `linux/arm64` variants, and the runtime selects the matching
+image automatically.
 
 ## What is inside?
 
@@ -85,10 +85,11 @@ One command boots:
 The environment is self-contained. It does not require a host Docker socket or
 a separate Compose stack.
 
-The graphical stack is about a third of the image, dominated by Chrome, Buzz
-Desktop's WebKit runtime, software GL, and fonts rather than by the desktop
-shell itself. See [IMAGE-SIZE.md](IMAGE-SIZE.md) for the measured breakdown and
-the reasoning, and run `make size-report` to reproduce it.
+The graphical stack is about a third of the AMD64 image, dominated by Chrome,
+Buzz Desktop's WebKit runtime, software GL, and fonts rather than by the
+desktop shell itself. ARM64 uses Chromium because Google does not publish
+Chrome for Linux ARM64. See [IMAGE-SIZE.md](IMAGE-SIZE.md) for the measured
+breakdown and reasoning, and run `make size-report` to reproduce it.
 
 Serving a web application instead of a desktop was considered and set aside,
 and here the case against it is stronger than in Buzznode. The relay's own web
@@ -298,6 +299,11 @@ This is a trusted, single-user development workstation:
 - The local relay does not require an API token or relay membership.
 - The `agent` user has passwordless sudo.
 - Authenticated coding agents can operate in `/workspace`.
+- Codex runs with `sandbox_mode = "danger-full-access"`. Its bubblewrap sandbox
+  cannot create a user namespace inside a container, so no sandbox mode is
+  enforceable here whatever is configured; the setting states what is true
+  rather than implying a boundary that does not exist. The boundary is the
+  container. Override with `BUZZBOX_CODEX_SANDBOX_MODE`.
 
 Keep the default loopback bind. Do not set `BIND_ADDRESS=0.0.0.0` unless the
 environment is placed behind suitable authentication and network controls.

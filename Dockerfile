@@ -4,13 +4,105 @@
 # agent workstation.
 #
 # The desktop release and relay image are pinned to the same upstream commit.
-# Buzz's current Linux desktop release is amd64-only, so this image is too.
+# Upstream publishes the Linux desktop package only for AMD64; ARM64 builds the
+# same immutable source tag and exact commit natively.
 
 ARG BUZZ_RELAY_IMAGE=ghcr.io/block/buzz:sha-0096d71
 FROM ${BUZZ_RELAY_IMAGE} AS buzz-relay
 
 FROM minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e AS minio
 FROM minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727 AS minio-client
+
+# Build a package with the same layout on both architectures. AMD64 retains
+# upstream's verified release .deb; ARM64 builds the pinned Tauri desktop and
+# its sidecars from source because upstream does not publish a Linux ARM64 .deb.
+FROM rust:1.95-bookworm AS buzz-desktop
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+ARG TARGETARCH
+ARG BUZZ_VERSION=0.4.26
+ARG BUZZ_DEB_SHA256=1b520756ecfc28ad81981a2cd5cc6688f785f447b3f5d8d553544906f59bf521
+ARG BUZZ_SOURCE_SHA=0096d710ed2e6abab19aaf7cdc14e3ee603d7ec8
+
+RUN set -eux; \
+    arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
+    apt-get update; \
+    if [ "$arch" = "arm64" ]; then \
+        apt-get install -y --no-install-recommends \
+            ca-certificates curl git gnupg \
+            build-essential file \
+            libasound2-dev libayatana-appindicator3-dev libgtk-3-dev \
+            librsvg2-dev libssl-dev libwebkit2gtk-4.1-dev libxdo-dev \
+            patchelf pkg-config xdg-utils; \
+    else \
+        apt-get install -y --no-install-recommends ca-certificates curl; \
+    fi; \
+    rm -rf /var/lib/apt/lists/*
+
+RUN set -eux; \
+    arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
+    if [ "$arch" = "arm64" ]; then \
+        apt-get update; \
+        apt-get install -y --no-install-recommends cmake; \
+        rm -rf /var/lib/apt/lists/*; \
+    fi
+
+RUN set -eux; \
+    arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
+    if [ "$arch" = "arm64" ]; then \
+        curl -fsSL https://deb.nodesource.com/setup_24.x | bash -; \
+        apt-get install -y --no-install-recommends nodejs; \
+        rm -rf /var/lib/apt/lists/*; \
+        corepack enable; \
+        corepack prepare pnpm@10.13.1 --activate; \
+    fi
+
+RUN set -eux; \
+    arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
+    mkdir -p /out; \
+    if [ "$arch" = "amd64" ]; then \
+        buzz_deb="/out/Buzz.deb"; \
+        curl -fsSL \
+            "https://github.com/block/buzz/releases/download/v${BUZZ_VERSION}/Buzz_${BUZZ_VERSION}_amd64.deb" \
+            -o "$buzz_deb"; \
+        echo "${BUZZ_DEB_SHA256}  ${buzz_deb}" | sha256sum -c -; \
+    elif [ "$arch" = "arm64" ]; then \
+        git clone --branch "v${BUZZ_VERSION}" --depth 1 \
+            https://github.com/block/buzz.git /tmp/buzz; \
+        cd /tmp/buzz; \
+        test "$(git rev-parse HEAD)" = "$BUZZ_SOURCE_SHA"; \
+        pnpm install --frozen-lockfile; \
+    else \
+        echo "Buzzbox does not support linux/$arch" >&2; \
+        exit 1; \
+    fi
+
+RUN set -eux; \
+    arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
+    if [ "$arch" = "arm64" ]; then \
+        cd /tmp/buzz; \
+        CARGO_BUILD_JOBS=2 cargo build --locked --release \
+            -p buzz-cli \
+            -p buzz-acp \
+            -p buzz-agent \
+            -p buzz-dev-mcp \
+            -p git-credential-nostr; \
+        ./scripts/bundle-sidecars.sh; \
+    fi
+
+RUN set -eux; \
+    arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
+    if [ "$arch" = "arm64" ]; then \
+        cd /tmp/buzz/desktop; \
+        CARGO_BUILD_JOBS=2 CMAKE_POLICY_VERSION_MINIMUM=3.5 \
+            pnpm tauri build --ci --bundles deb; \
+        mapfile -t packages < <(find src-tauri/target/release/bundle/deb \
+            -maxdepth 1 -type f -name '*.deb'); \
+        test "${#packages[@]}" -eq 1; \
+        install -m 0644 "${packages[0]}" /out/Buzz.deb; \
+        dpkg-deb --info /out/Buzz.deb >/dev/null; \
+    fi
 
 # ═══════════════════════════════════════════════════════════════════
 # Stage: core - shared runtime/tooling baseline for agent workloads.
@@ -22,8 +114,11 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ARG TARGETARCH
 ENV DEBIAN_FRONTEND=noninteractive
 
-RUN test "${TARGETARCH:-amd64}" = "amd64" || \
-    { echo "Buzzbox currently supports linux/amd64 only" >&2; exit 1; }
+RUN arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
+    case "$arch" in \
+        amd64|arm64) ;; \
+        *) echo "Buzzbox does not support linux/$arch" >&2; exit 1 ;; \
+    esac
 
 # Core tools, local Buzz service dependencies, and desktop runtime libraries.
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -66,12 +161,19 @@ RUN npm install -g \
 
 # Goose exposes ACP natively, so it does not need a separate adapter.
 ARG GOOSE_VERSION=1.44.0
-ARG GOOSE_ARCHIVE_SHA256=07febc8b4f73bdfdc3ece3d34d0e21b005f3a4f43008f95b85d6538da8f6bac1
-RUN goose_archive="/tmp/goose-${GOOSE_VERSION}.tar.gz" && \
+ARG GOOSE_AMD64_SHA256=07febc8b4f73bdfdc3ece3d34d0e21b005f3a4f43008f95b85d6538da8f6bac1
+ARG GOOSE_ARM64_SHA256=da6cb005d421b0bdcb83fe8386ba5ae8060ef17adf64641a684d4fc4b9e1c15f
+RUN arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
+    case "$arch" in \
+        amd64) goose_arch=x86_64; goose_sha="$GOOSE_AMD64_SHA256" ;; \
+        arm64) goose_arch=aarch64; goose_sha="$GOOSE_ARM64_SHA256" ;; \
+        *) echo "Unsupported Goose architecture: $arch" >&2; exit 1 ;; \
+    esac; \
+    goose_archive="/tmp/goose-${GOOSE_VERSION}.tar.gz" && \
     curl -fsSL --retry 5 --retry-all-errors --connect-timeout 20 \
-        "https://github.com/aaif-goose/goose/releases/download/v${GOOSE_VERSION}/goose-x86_64-unknown-linux-gnu.tar.gz" \
+        "https://github.com/aaif-goose/goose/releases/download/v${GOOSE_VERSION}/goose-${goose_arch}-unknown-linux-gnu.tar.gz" \
         -o "$goose_archive" && \
-    echo "${GOOSE_ARCHIVE_SHA256}  ${goose_archive}" | sha256sum -c - && \
+    echo "${goose_sha}  ${goose_archive}" | sha256sum -c - && \
     goose_dir="$(mktemp -d)" && \
     tar -xzf "$goose_archive" -C "$goose_dir" && \
     install -m 0755 "$goose_dir/goose" /usr/local/bin/goose && \
@@ -81,7 +183,8 @@ RUN goose_archive="/tmp/goose-${GOOSE_VERSION}.tar.gz" && \
 
 # Mike Farah yq.
 ARG YQ_VERSION=4.44.6
-RUN curl -fsSL "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_amd64" \
+RUN arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
+    curl -fsSL "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_${arch}" \
         -o /usr/local/bin/yq && \
     chmod +x /usr/local/bin/yq && \
     yq --version
@@ -95,23 +198,20 @@ COPY --from=buzz-relay /srv/buzz /srv/buzz
 COPY --from=minio /usr/bin/minio /usr/local/bin/minio
 COPY --from=minio-client /usr/bin/mc /usr/local/bin/mc
 
-# The released Buzz desktop package includes buzz-desktop, buzz, buzz-acp,
-# buzz-agent, buzz-dev-mcp, and git-credential-nostr.
-ARG BUZZ_VERSION=0.4.26
-ARG BUZZ_DEB_SHA256=1b520756ecfc28ad81981a2cd5cc6688f785f447b3f5d8d553544906f59bf521
-RUN buzz_deb="/tmp/Buzz_${BUZZ_VERSION}_amd64.deb"; \
-    curl -fsSL \
-        "https://github.com/block/buzz/releases/download/v${BUZZ_VERSION}/Buzz_${BUZZ_VERSION}_amd64.deb" \
-        -o "$buzz_deb"; \
-    echo "${BUZZ_DEB_SHA256}  ${buzz_deb}" | sha256sum -c -; \
+# Install the architecture's package produced above. Both variants include
+# buzz-desktop and the five sidecars at the same paths.
+COPY --from=buzz-desktop /out/Buzz.deb /tmp/Buzz.deb
+RUN set -eux; \
     apt-get update; \
-    apt-get install -y --no-install-recommends "$buzz_deb"; \
-    rm -f "$buzz_deb"; \
+    apt-get install -y --no-install-recommends /tmp/Buzz.deb; \
+    rm -f /tmp/Buzz.deb; \
     rm -rf /var/lib/apt/lists/*; \
     command -v buzz-desktop; \
     command -v buzz; \
     command -v buzz-acp; \
-    command -v buzz-agent
+    command -v buzz-agent; \
+    command -v buzz-dev-mcp; \
+    command -v git-credential-nostr
 
 # Required directories.
 RUN mkdir -p /data /outputs /workspace /var/lib/buzzbox /var/log/buzzbox
@@ -148,17 +248,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Cortile provides optional dynamic tiling on top of Openbox.
 ARG CORTILE_VERSION=2.5.2
-RUN tmp_dir="$(mktemp -d)"; \
+RUN arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
+    case "$arch" in \
+        amd64) cortile_arch=amd64 ;; \
+        arm64) cortile_arch=arm64 ;; \
+        *) echo "Unsupported Cortile architecture: $arch" >&2; exit 1 ;; \
+    esac; \
+    tmp_dir="$(mktemp -d)"; \
     curl -fsSL \
-        "https://github.com/leukipp/cortile/releases/download/v${CORTILE_VERSION}/cortile_${CORTILE_VERSION}_linux_amd64.tar.gz" \
+        "https://github.com/leukipp/cortile/releases/download/v${CORTILE_VERSION}/cortile_${CORTILE_VERSION}_linux_${cortile_arch}.tar.gz" \
         | tar -xz -C "$tmp_dir"; \
     install -m 0755 "$tmp_dir/cortile" /usr/local/bin/cortile; \
     rm -rf "$tmp_dir"
 
 # KasmVNC exposes the desktop in a browser.
 ARG KASMVNC_VERSION=1.4.0
-RUN curl -fsSL \
-        "https://github.com/kasmtech/KasmVNC/releases/download/v${KASMVNC_VERSION}/kasmvncserver_noble_${KASMVNC_VERSION}_amd64.deb" \
+RUN arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
+    curl -fsSL \
+        "https://github.com/kasmtech/KasmVNC/releases/download/v${KASMVNC_VERSION}/kasmvncserver_noble_${KASMVNC_VERSION}_${arch}.deb" \
         -o /tmp/kasmvnc.deb && \
     apt-get update && \
     apt-get install -y --no-install-recommends /tmp/kasmvnc.deb && \
@@ -179,14 +286,36 @@ RUN curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor \
     apt-get install -y --no-install-recommends docker-ce-cli gh && \
     rm -rf /var/lib/apt/lists/*
 
-# Chrome is a secondary browser for documentation and login flows.
-RUN curl -fsSL https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
-        -o /tmp/chrome.deb && \
-    apt-get update && \
-    apt-get install -y --no-install-recommends /tmp/chrome.deb && \
-    rm -f /tmp/chrome.deb && \
-    rm -rf /var/lib/apt/lists/* && \
-    rm -f /usr/local/bin/chromium
+# Google does not publish Chrome for Linux ARM64. Keep Chrome on AMD64 and use
+# Debian's signed Chromium package on ARM64 behind the same Buzzbox launcher.
+RUN set -eux; \
+    arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
+    if [ "$arch" = "amd64" ]; then \
+        curl -fsSL https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
+            -o /tmp/browser.deb; \
+        apt-get update; \
+        apt-get install -y --no-install-recommends /tmp/browser.deb; \
+        rm -f /tmp/browser.deb; \
+    else \
+        mkdir -p /etc/apt/keyrings; \
+        curl -fsSL https://ftp-master.debian.org/keys/archive-key-12.asc \
+            -o /etc/apt/keyrings/debian-archive-key-12.asc; \
+        printf '%s\n' \
+            'deb [arch=arm64 signed-by=/etc/apt/keyrings/debian-archive-key-12.asc] https://deb.debian.org/debian bookworm main' \
+            > /etc/apt/sources.list.d/debian-bookworm.list; \
+        printf '%s\n' \
+            'Package: *' \
+            'Pin: release n=bookworm' \
+            'Pin-Priority: 100' \
+            > /etc/apt/preferences.d/debian-bookworm; \
+        apt-get update; \
+        apt-get install -y --no-install-recommends chromium; \
+        rm -f \
+            /etc/apt/keyrings/debian-archive-key-12.asc \
+            /etc/apt/preferences.d/debian-bookworm \
+            /etc/apt/sources.list.d/debian-bookworm.list; \
+    fi; \
+    rm -rf /var/lib/apt/lists/*
 
 # ═══════════════════════════════════════════════════════════════════
 # Stage: buzzbox - complete independently runnable environment.
@@ -223,6 +352,22 @@ ENV HOME=/home/buzzbox \
     BUZZ_RELAY_URL=ws://127.0.0.1:3000 \
     BUZZ_WEB_DIR=/srv/buzz/web \
     BUZZ_ADMIN_WEB_DIR=/srv/buzz/admin-web
+ENV GTK_THEME=Buzzbox
+# Chrome and Chromium ask GTK for embedded symbolic window-control resources.
+# Overlay only those four resources so their custom frames use the exact
+# Openbox glyph masks.
+ENV G_RESOURCE_OVERLAYS=/org/gtk/libgtk=/usr/share/buzzbox/gtk-overlay
+
+# Browser popup menus come from Linux's native color pipeline rather than
+# extension-theme colors. A GTK system theme therefore styles the menus,
+# dialogs, toolbar, tabs, and omnibox as one coherent near-black surface.
+COPY gtk/Buzzbox /usr/share/themes/Buzzbox
+COPY gtk/generate-resource-overlay.py /tmp/generate-gtk-resource-overlay.py
+COPY openbox/theme /tmp/openbox-theme
+# Generate real symbolic PNGs directly from the Openbox XBM source assets.
+RUN python3 /tmp/generate-gtk-resource-overlay.py \
+        /tmp/openbox-theme /usr/share/buzzbox/gtk-overlay && \
+    rm -rf /tmp/generate-gtk-resource-overlay.py /tmp/openbox-theme
 
 RUN echo "agent ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/agent && \
     chmod 0440 /etc/sudoers.d/agent && \
@@ -240,9 +385,27 @@ RUN chmod +x /tmp/kasm-patch.sh && /tmp/kasm-patch.sh && rm /tmp/kasm-patch.sh
 # Match the Buzz website's chartreuse background and subtle dot grid.
 COPY wallpaper/buzz-grid.svg /usr/share/backgrounds/buzz-grid.svg
 
-RUN mkdir -p /etc/opt/chrome/policies/managed && \
+# Browser preferences. `system_theme: 1` selects GTK on Linux; unlike an
+# extension theme, it also reaches native menus and other popup surfaces.
+RUN for config_dir in google-chrome chromium; do \
+        mkdir -p "/home/buzzbox/.config/$config_dir/Default"; \
+        printf '{\n  "browser": {\n    "has_seen_welcome_page": true,\n    "check_default_browser": false\n  },\n  "bookmark_bar": { "show_on_all_tabs": false },\n  "distribution": {\n    "skip_first_run_ui": true,\n    "show_welcome_page": false,\n    "import_bookmarks": false,\n    "make_chrome_default_for_user": false,\n    "suppress_first_run_default_browser_prompt": true\n  },\n  "extensions": {\n    "theme": {\n      "system_theme": 1\n    }\n  }\n}' \
+            > "/home/buzzbox/.config/$config_dir/Default/Preferences"; \
+        touch "/home/buzzbox/.config/$config_dir/First Run"; \
+    done && \
+    chown -R agent:agent \
+        /home/buzzbox/.config/google-chrome \
+        /home/buzzbox/.config/chromium
+
+# Suppress the default-browser prompt via managed policy. Do not set
+# BrowserThemeColor here: that policy overrides Chrome's GTK system theme.
+RUN mkdir -p \
+        /etc/opt/chrome/policies/managed \
+        /etc/chromium/policies/managed && \
     printf '{\n  "DefaultBrowserSettingEnabled": false,\n  "BrowserSignin": 0,\n  "HomepageLocation": "file:///opt/browser/index.html",\n  "HomepageIsNewTabPage": false,\n  "ShowHomeButton": true\n}\n' \
-        > /etc/opt/chrome/policies/managed/chrome-policy.json
+        > /etc/opt/chrome/policies/managed/buzzbox-policy.json && \
+    cp /etc/opt/chrome/policies/managed/buzzbox-policy.json \
+        /etc/chromium/policies/managed/buzzbox-policy.json
 
 COPY openbox/rc.xml /etc/xdg/openbox/rc.xml
 COPY openbox/menu.xml /etc/xdg/openbox/menu.xml

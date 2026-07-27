@@ -34,8 +34,8 @@ permissions:
   contents: read
 
 jobs:
-  build:
-    name: Build and smoke test
+  validate:
+    name: Validate source and release metadata
     runs-on: ubuntu-latest
 
     steps:
@@ -64,26 +64,53 @@ jobs:
       - name: Validate scripts and pinned metadata
         run: make check
 
+  build:
+    name: Build and smoke test (${{ matrix.arch }})
+    needs: validate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
+        with:
+          buildkitd-config-inline: |
+            [worker.oci]
+              max-parallelism = 2
 
       - name: Build image
         uses: docker/build-push-action@v7
         with:
           context: .
           load: true
-          platforms: linux/amd64
+          platforms: ${{ matrix.platform }}
           push: false
-          tags: pdparchitect/buzzbox:ci
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          tags: pdparchitect/buzzbox:ci-${{ matrix.arch }}
+          cache-from: type=gha,scope=buzzbox-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=buzzbox-${{ matrix.arch }}
 
       - name: Smoke test
         shell: bash
+        env:
+          ARCH: ${{ matrix.arch }}
+          IMAGE: pdparchitect/buzzbox:ci-${{ matrix.arch }}
+          PLATFORM: ${{ matrix.platform }}
         run: |
           set -euo pipefail
 
-          container="buzzbox-ci"
+          container="buzzbox-ci-${ARCH}"
           cleanup() {
             docker rm --force "$container" >/dev/null 2>&1 || true
           }
@@ -91,11 +118,11 @@ jobs:
 
           docker run --detach \
             --name "$container" \
-            --platform linux/amd64 \
+            --platform "$PLATFORM" \
             --shm-size 1g \
             --publish 127.0.0.1:16903:6901 \
             --publish 127.0.0.1:13000:3000 \
-            pdparchitect/buzzbox:ci
+            "$IMAGE"
 
           ready=false
           for attempt in $(seq 1 60); do
@@ -115,16 +142,6 @@ jobs:
             exit 1
           fi
 
-          docker exec "$container" bash -ec '
-            for command in buzz-desktop buzz buzz-acp buzz-agent buzz-relay \
-              codex codex-acp claude claude-agent-acp goose; do
-              command -v "$command" >/dev/null
-            done
-            redis-cli ping | grep -q PONG
-            pg_isready -h 127.0.0.1 -p 5432 -U buzz >/dev/null
-            curl -fsS http://127.0.0.1:9000/minio/health/live >/dev/null
-            pgrep -x buzz-relay >/dev/null
-            pgrep -f buzz-desktop >/dev/null
-          '
+          bash tests/smoke-container.sh "$container" "$ARCH"
 
-          echo "Buzzbox is ready with the desktop, relay, and agent runtimes"
+          echo "Buzzbox is ready with its desktop, relay, backing services, and agent runtimes on $PLATFORM"

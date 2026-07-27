@@ -152,6 +152,72 @@ printf -v git_hook_secret_q '%q' "$BUZZ_GIT_HOOK_HMAC_SECRET"
 printf -v buzz_web_dir_q '%q' "$BUZZ_WEB_DIR"
 printf -v buzz_admin_web_dir_q '%q' "$BUZZ_ADMIN_WEB_DIR"
 
+# Codex and Claude Code each prompt once per directory before working in it
+# ("Do you trust the contents of this directory?"). Buzzbox ships the same ACP
+# adapters as Buzznode, and codex-acp consults trust_level, so a harness
+# started against the workspace stops on that prompt. Record the decision at
+# boot so the workspace behaves the same way across both images.
+#
+# Unlike Buzznode there is no scripted unattended launch here - harnesses are
+# started from the menu - so this is consistency rather than a hang. Set
+# BUZZBOX_TRUST_WORKSPACE=false to leave both prompts in place.
+harness_workdir="${BUZZBOX_HARNESS_WORKDIR:-/workspace}"
+codex_config="$HOME/.codex/config.toml"
+
+# Codex sandboxes the commands it runs with bubblewrap, and warns when it has to
+# fall back to its bundled copy. Neither copy can work here: the container blocks
+# unprivileged user namespaces, so bwrap cannot create one, and installing the
+# distro package only adds a second binary that fails the same way. Declare the
+# mode that matches reality rather than leaving a config that implies an
+# isolation boundary which is not there - the boundary is the container itself.
+#
+# Set BUZZBOX_CODEX_SANDBOX_MODE to read-only or workspace-write to choose a
+# different mode, or to an empty value to leave the setting out entirely.
+codex_sandbox_mode="${BUZZBOX_CODEX_SANDBOX_MODE-danger-full-access}"
+if [ -n "$codex_sandbox_mode" ] &&
+    ! grep -Eq '^sandbox_mode *=' "$codex_config" 2>/dev/null; then
+    codex_sandbox_tmp="$(mktemp)"
+    # Prepended, not appended: sandbox_mode is a top-level key, and TOML assigns
+    # any key following a [table] header to that table. The trust block below
+    # writes [projects."..."] tables, so appending would quietly turn this into a
+    # per-project setting instead of a global one.
+    {
+        printf 'sandbox_mode = "%s"\n\n' "$codex_sandbox_mode"
+        [ -s "$codex_config" ] && cat "$codex_config"
+    } > "$codex_sandbox_tmp"
+    install -m 0600 -o agent -g agent "$codex_sandbox_tmp" "$codex_config"
+    rm -f "$codex_sandbox_tmp"
+    echo "[buzzbox] set Codex sandbox_mode=$codex_sandbox_mode" \
+        "(no usable bubblewrap in a container)"
+fi
+
+if [ "${BUZZBOX_TRUST_WORKSPACE:-true}" = "true" ]; then
+    if ! grep -Fq "[projects.\"$harness_workdir\"]" "$codex_config" 2>/dev/null; then
+        printf '\n[projects."%s"]\ntrust_level = "trusted"\n' \
+            "$harness_workdir" >> "$codex_config"
+        chown agent:agent "$codex_config"
+        echo "[buzzbox] recorded $harness_workdir as trusted for Codex"
+    fi
+
+    claude_config="$HOME/.claude.json"
+    if ! jq -e --arg dir "$harness_workdir" \
+        '.projects[$dir].hasTrustDialogAccepted == true' \
+        "$claude_config" >/dev/null 2>&1; then
+        [ -s "$claude_config" ] || echo '{}' > "$claude_config"
+        claude_trust_tmp="$(mktemp)"
+        # Leave the file untouched if it is not valid JSON rather than
+        # replacing a config the operator may have hand-written.
+        if jq --arg dir "$harness_workdir" \
+            '.projects[$dir].hasTrustDialogAccepted = true' \
+            "$claude_config" > "$claude_trust_tmp" 2>/dev/null; then
+            install -m 0600 -o agent -g agent \
+                "$claude_trust_tmp" "$claude_config"
+            echo "[buzzbox] recorded $harness_workdir as trusted for Claude Code"
+        fi
+        rm -f "$claude_trust_tmp"
+    fi
+fi
+
 # Use a GPU only when the host exposes a render node *and* the desktop user can
 # open it; otherwise keep software rendering. A passed-through node is normally
 # root:render 0660 and the host's render group does not exist in this image, so
