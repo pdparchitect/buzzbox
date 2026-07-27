@@ -33,7 +33,10 @@ bundle, but Buzznode does not require Buzzbox to run.
 ## Quick start
 
 Buzzbox is published as a complete image on GitHub Container Registry. One
-command starts the whole workspace:
+command starts the whole workspace. Release tags contain native AMD64 and ARM64
+images.
+
+### Docker
 
 ```bash
 docker run --detach \
@@ -52,6 +55,54 @@ docker run --detach \
   ghcr.io/pdparchitect/buzzbox:latest
 ```
 
+### Podman
+
+```bash
+podman run --detach \
+  --name buzzbox \
+  --restart unless-stopped \
+  --shm-size 1g \
+  --publish 127.0.0.1:6903:6901 \
+  --publish 127.0.0.1:3000:3000 \
+  --volume buzzbox-workspace:/workspace \
+  --volume buzzbox-services:/var/lib/buzzbox \
+  --volume buzzbox-config:/home/buzzbox/.config \
+  --volume buzzbox-data:/home/buzzbox/.local/share \
+  --volume buzzbox-nest:/home/buzzbox/.buzz \
+  --volume buzzbox-codex:/home/buzzbox/.codex \
+  --volume buzzbox-claude:/home/buzzbox/.claude \
+  ghcr.io/pdparchitect/buzzbox:latest
+```
+
+### Apple container
+
+Apple's [`container`](https://github.com/apple/container) tool requires Apple
+silicon and macOS 26 or later. Start its service once, then allocate additional
+memory for Buzz Desktop, the relay, PostgreSQL, Redis, MinIO, and the browser:
+
+```bash
+container system start
+
+container run --detach \
+  --name buzzbox \
+  --memory 8g \
+  --shm-size 1g \
+  --publish 127.0.0.1:6903:6901 \
+  --publish 127.0.0.1:3000:3000 \
+  --volume buzzbox-workspace:/workspace \
+  --volume buzzbox-services:/var/lib/buzzbox \
+  --volume buzzbox-config:/home/buzzbox/.config \
+  --volume buzzbox-data:/home/buzzbox/.local/share \
+  --volume buzzbox-nest:/home/buzzbox/.buzz \
+  --volume buzzbox-codex:/home/buzzbox/.codex \
+  --volume buzzbox-claude:/home/buzzbox/.claude \
+  ghcr.io/pdparchitect/buzzbox:latest
+```
+
+Apple `container` preserves the named volumes and stopped container but does
+not expose a Docker-style restart policy. Restart it with
+`container start buzzbox`.
+
 Open <http://127.0.0.1:6903>. Buzz launches automatically once the local relay
 is ready.
 
@@ -61,11 +112,9 @@ database, media store, and agent logins are discarded whenever the container is
 replaced, and the orphaned volumes stay on disk. See
 [Persistence](#persistence).
 
-For Podman, run the same command with `podman` in place of `docker`. The image
-also works with other OCI-compatible runtimes, including containerd with
-nerdctl, using the port mappings above. Release tags contain native
-`linux/amd64` and `linux/arm64` variants, and the runtime selects the matching
-image automatically.
+The image also works with other OCI-compatible runtimes, including containerd
+with nerdctl, using the port mappings above. Docker and Podman select the host's
+native image automatically; Apple `container` selects ARM64 on Apple silicon.
 
 ## What is inside?
 
