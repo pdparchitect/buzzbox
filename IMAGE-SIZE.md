@@ -14,20 +14,20 @@ make size-report
 
 ## Measured composition
 
-`pdparchitect/buzzbox:local`, **4.28 GB** (4082 MiB) uncompressed:
+`pdparchitect/buzzbox:local` on AMD64, **4.28 GB** (4082 MiB) uncompressed:
 
-| Layer                                    |   Size |
-| ---------------------------------------- | -----: |
+| Layer                                    |    Size |
+| ---------------------------------------- | ------: |
 | Codex, Claude Code, and the ACP adapters | 1.31 GB |
-| Core apt baseline, including GTK/WebKit   | 1.22 GB |
-| Google Chrome                             |  441 MB |
-| Goose                                     |  299 MB |
-| Node.js 24                                |  198 MB |
-| Desktop apt layer                         |  191 MB |
-| Buzz `.deb`                               |  173 MB |
-| MinIO                                     |  111 MB |
-| Docker and GitHub CLIs                    | 89.2 MB |
-| Ubuntu base                               | 78.1 MB |
+| Core apt baseline, including GTK/WebKit  | 1.22 GB |
+| Google Chrome                            |  441 MB |
+| Goose                                    |  299 MB |
+| Node.js 24                               |  198 MB |
+| Desktop apt layer                        |  191 MB |
+| Buzz `.deb`                              |  173 MB |
+| MinIO                                    |  111 MB |
+| Docker and GitHub CLIs                   | 89.2 MB |
+| Ubuntu base                              | 78.1 MB |
 
 The graphical substrate is **1265 MiB, or 31.0% of the image**. It is not the
 largest contributor: the three coding CLIs alone are larger.
@@ -36,8 +36,8 @@ Measured as a dependency closure — what apt would remove if the desktop
 top-level packages were purged — so transitively shared libraries are counted
 once and attributed correctly:
 
-| Component                             |     Size |
-| ------------------------------------- | -------: |
+| Component                             |      Size |
+| ------------------------------------- | --------: |
 | Chrome                                | 413.6 MiB |
 | Mesa and LLVM software GL             | 186.2 MiB |
 | Buzz `.deb`                           | 162.7 MiB |
@@ -85,15 +85,16 @@ headless binaries from the same `.deb` is what lets it skip both.
 and LLVM behind it — 186 MiB — do the rasterising for Chrome, WebKit, and
 picom.
 
-**Chrome and fonts.** Chrome is the secondary browser for documentation and
-login flows; fonts are what keep the desktop legible.
+**Browser and fonts.** Chrome is the secondary browser for documentation and
+login flows on AMD64. ARM64 uses Debian Chromium because Google does not
+publish Chrome for Linux ARM64; fonts are what keep both desktops legible.
 
 ## Computer use
 
 Buzzbox ships the same computer-use toolchain as Buzznode — `scrot` for screen
 capture, `xdotool` for input injection, `wmctrl` and Openbox for window
-management, Chrome as a target application, and KasmVNC so a human can watch
-the same `:1` display live.
+management, a Chromium-family browser as a target application, and KasmVNC so
+a human can watch the same `:1` display live.
 
 The forward-looking case for that toolchain is stronger in Buzznode, which is
 one persistent computer for one agent with its own volumes, browser profile,
@@ -111,10 +112,10 @@ developed against one desktop transfers to the other.
 KasmVNC supplies its own X server, so the packages Ubuntu ships for driving
 real display hardware were never reachable:
 
-| Removed              | Why                                                                |
-| -------------------- | ------------------------------------------------------------------ |
-| `xorg` metapackage   | Pulls `xserver-xorg-core`, input/video drivers, `keyboard-configuration`, and `udev` for hardware the container does not have. |
-| `x11-xserver-utils`  | Its only consumer would be the `xrdb` call in KasmVNC's generated `xstartup`, and `xstartup` is replaced with `exec openbox-session`. It also drags in `cpp`/`gcc-13`. |
+| Removed             | Why                                                                                                                                                                    |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `xorg` metapackage  | Pulls `xserver-xorg-core`, input/video drivers, `keyboard-configuration`, and `udev` for hardware the container does not have.                                         |
+| `x11-xserver-utils` | Its only consumer would be the `xrdb` call in KasmVNC's generated `xstartup`, and `xstartup` is replaced with `exec openbox-session`. It also drags in `cpp`/`gcc-13`. |
 
 Together this removed about 86 MiB. `systemd` remains in Buzzbox — PostgreSQL
 and the D-Bus user session require it — which is why the saving here is smaller
@@ -133,13 +134,13 @@ assertions pass, including the relay, PostgreSQL, Redis, MinIO, and
 
 ## What is deliberately kept
 
-| Kept                       |     Size | Reason                                                                 |
-| -------------------------- | -------: | ---------------------------------------------------------------------- |
-| WebKitGTK                  | 122 MiB | Buzz Desktop links it. Removing it removes the product.                |
-| Chrome                     | 414 MiB | Login flows and documentation today, computer-use target tomorrow.      |
-| Mesa and LLVM software GL  | 186 MiB | Hard dependency of `kasmvncserver`, `picom`, and `libgbm1`, and the renderer for WebKit with no GPU present. |
-| Fonts and icon themes      | 144 MiB | Desktop legibility, and screenshot legibility for vision models.        |
-| Ghostscript chain          |  26 MiB | Structural: `openbox`'s `libobrender32v5` and `tint2` need imlib2, which needs `libspectre1`, which needs `libgs10`. Dropping `feh` alone frees only 10 MiB. |
+| Kept                      |    Size | Reason                                                                                                                                                       |
+| ------------------------- | ------: | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| WebKitGTK                 | 122 MiB | Buzz Desktop links it. Removing it removes the product.                                                                                                      |
+| Chrome                    | 414 MiB | Login flows and documentation today, computer-use target tomorrow.                                                                                           |
+| Mesa and LLVM software GL | 186 MiB | Hard dependency of `kasmvncserver`, `picom`, and `libgbm1`, and the renderer for WebKit with no GPU present.                                                 |
+| Fonts and icon themes     | 144 MiB | Desktop legibility, and screenshot legibility for vision models.                                                                                             |
+| Ghostscript chain         |  26 MiB | Structural: `openbox`'s `libobrender32v5` and `tint2` need imlib2, which needs `libspectre1`, which needs `libgs10`. Dropping `feh` alone frees only 10 MiB. |
 
 ## Compression
 

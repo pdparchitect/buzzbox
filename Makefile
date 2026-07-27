@@ -4,16 +4,22 @@ SHELL := /bin/bash
 DOCKER ?= docker
 IMAGE ?= pdparchitect/buzzbox:local
 CONTAINER ?= buzzbox
-PLATFORM ?= linux/amd64
+NATIVE_ARCH := $(shell uname -m | sed \
+	-e 's/^x86_64$$/amd64/' \
+	-e 's/^aarch64$$/arm64/')
+PLATFORM ?= linux/$(NATIVE_ARCH)
+TARGETARCH ?= $(word 2,$(subst /, ,$(PLATFORM)))
 BUZZ_VERSION ?= 0.4.26
 BUZZ_DEB_SHA256 ?= 1b520756ecfc28ad81981a2cd5cc6688f785f447b3f5d8d553544906f59bf521
+BUZZ_SOURCE_SHA ?= 0096d710ed2e6abab19aaf7cdc14e3ee603d7ec8
 BUZZ_RELAY_IMAGE ?= ghcr.io/block/buzz:sha-0096d71
 CODEX_VERSION ?= 0.145.0
 CLAUDE_CODE_VERSION ?= 2.1.220
 CODEX_ACP_VERSION ?= 1.1.7
 CLAUDE_ACP_VERSION ?= 0.62.0
 GOOSE_VERSION ?= 1.44.0
-GOOSE_ARCHIVE_SHA256 ?= 07febc8b4f73bdfdc3ece3d34d0e21b005f3a4f43008f95b85d6538da8f6bac1
+GOOSE_AMD64_SHA256 ?= 07febc8b4f73bdfdc3ece3d34d0e21b005f3a4f43008f95b85d6538da8f6bac1
+GOOSE_ARM64_SHA256 ?= da6cb005d421b0bdcb83fe8386ba5ae8060ef17adf64641a684d4fc4b9e1c15f
 BIND_ADDRESS ?= 127.0.0.1
 PORT ?= 6903
 RELAY_PORT ?= 3000
@@ -51,41 +57,56 @@ help:
 	@echo "  make size-report  Report the graphical stack's share of the image"
 	@echo
 	@echo "Overrides: PORT=8080 RELAY_PORT=3001 RESOLUTION=1600x900"
+	@echo "           PLATFORM=linux/arm64 (default: $(PLATFORM))"
 	@echo "           BUZZ_NETWORK=buzz-local"
 	@echo "           PUBLIC_RELAY_URL=ws://buzzbox:3000 VNC_STATS=true"
 
 check:
 	bash -n init.sh openbox/autostart shell/buzzbox shell/chromium shell/welcome \
 		shell/agent-runtime-login shell/buzznode-enrollment \
-		tests/test-agent-runtime-login.sh tests/test-buzznode-enrollment.sh
+		tests/test-agent-runtime-login.sh tests/test-buzznode-enrollment.sh \
+		tests/test-desktop-theme.sh tests/smoke-container.sh
 	bash tests/test-agent-runtime-login.sh
 	bash tests/test-buzznode-enrollment.sh
+	bash tests/test-desktop-theme.sh
 	@grep -q "^ARG BUZZ_VERSION=$(BUZZ_VERSION)$$" Dockerfile
 	@grep -q "^ARG BUZZ_DEB_SHA256=$(BUZZ_DEB_SHA256)$$" Dockerfile
+	@grep -q "^ARG BUZZ_SOURCE_SHA=$(BUZZ_SOURCE_SHA)$$" Dockerfile
 	@grep -q "^ARG BUZZ_RELAY_IMAGE=$(BUZZ_RELAY_IMAGE)$$" Dockerfile
 	@grep -q "^ARG CODEX_VERSION=$(CODEX_VERSION)$$" Dockerfile
 	@grep -q "^ARG CLAUDE_CODE_VERSION=$(CLAUDE_CODE_VERSION)$$" Dockerfile
 	@grep -q "^ARG CODEX_ACP_VERSION=$(CODEX_ACP_VERSION)$$" Dockerfile
 	@grep -q "^ARG CLAUDE_ACP_VERSION=$(CLAUDE_ACP_VERSION)$$" Dockerfile
 	@grep -q "^ARG GOOSE_VERSION=$(GOOSE_VERSION)$$" Dockerfile
-	@grep -q "^ARG GOOSE_ARCHIVE_SHA256=$(GOOSE_ARCHIVE_SHA256)$$" Dockerfile
+	@grep -q "^ARG GOOSE_AMD64_SHA256=$(GOOSE_AMD64_SHA256)$$" Dockerfile
+	@grep -q "^ARG GOOSE_ARM64_SHA256=$(GOOSE_ARM64_SHA256)$$" Dockerfile
 	@grep -q 'assets/favicon.svg' kasm/patch.sh
 	@grep -q 'COPY kasm/favicon.svg /usr/share/kasmvnc/www/assets/favicon.svg' Dockerfile
+	@grep -q 'window.handle.width: 0' openbox/theme/themerc
+	@grep -q 'window.client.padding.width: 6' openbox/theme/themerc
+	@grep -q 'window.client.padding.height: 6' openbox/theme/themerc
+	@grep -q 'cd /workspace' shell/bashrc
+	@grep -q 'BUZZBOX_CODEX_SANDBOX_MODE' init.sh
+	@grep -q 'BUZZBOX_CODEX_SANDBOX_MODE' README.md
+	@grep -q '\[ -n "$${PS1:-}" \]' shell/bashrc
+	@grep -q '<action name="Resize" />' openbox/rc.xml
 	@echo "Buzzbox metadata and shell syntax are valid."
 
 build:
 	$(DOCKER) build \
 		--platform "$(PLATFORM)" \
-		--build-arg TARGETARCH=amd64 \
+		--build-arg "TARGETARCH=$(TARGETARCH)" \
 		--build-arg "BUZZ_VERSION=$(BUZZ_VERSION)" \
 		--build-arg "BUZZ_DEB_SHA256=$(BUZZ_DEB_SHA256)" \
+		--build-arg "BUZZ_SOURCE_SHA=$(BUZZ_SOURCE_SHA)" \
 		--build-arg "BUZZ_RELAY_IMAGE=$(BUZZ_RELAY_IMAGE)" \
 		--build-arg "CODEX_VERSION=$(CODEX_VERSION)" \
 		--build-arg "CLAUDE_CODE_VERSION=$(CLAUDE_CODE_VERSION)" \
 		--build-arg "CODEX_ACP_VERSION=$(CODEX_ACP_VERSION)" \
 		--build-arg "CLAUDE_ACP_VERSION=$(CLAUDE_ACP_VERSION)" \
 		--build-arg "GOOSE_VERSION=$(GOOSE_VERSION)" \
-		--build-arg "GOOSE_ARCHIVE_SHA256=$(GOOSE_ARCHIVE_SHA256)" \
+		--build-arg "GOOSE_AMD64_SHA256=$(GOOSE_AMD64_SHA256)" \
+		--build-arg "GOOSE_ARM64_SHA256=$(GOOSE_ARM64_SHA256)" \
 		--tag "$(IMAGE)" \
 		.
 
@@ -153,16 +174,8 @@ smoke:
 		$(DOCKER) logs --tail 150 "$(CONTAINER)" || true; \
 		exit 1; \
 	fi
-	@$(DOCKER) exec "$(CONTAINER)" bash -ec '\
-		for command in agent-runtime-login buzz-desktop buzz buzz-acp buzz-agent buzz-relay \
-			buzznode-enrollment codex codex-acp claude claude-agent-acp goose; do \
-			command -v "$$command" >/dev/null; \
-		done; \
-		redis-cli ping | grep -q PONG; \
-		pg_isready -h 127.0.0.1 -p 5432 -U buzz >/dev/null; \
-		curl -fsS http://127.0.0.1:9000/minio/health/live >/dev/null; \
-		pgrep -x buzz-relay >/dev/null; \
-		pgrep -f buzz-desktop >/dev/null'
+	@DOCKER="$(DOCKER)" bash tests/smoke-container.sh \
+		"$(CONTAINER)" "$(TARGETARCH)"
 	@echo "Buzzbox is ready with the desktop, relay, and agent runtimes."
 
 stop:
