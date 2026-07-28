@@ -6,6 +6,13 @@ All notable changes to Buzzbox are documented here, following
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-28
+
+### Changed
+
+- Update Buzz Desktop to 0.5.0 and the matching relay to upstream commit
+  `4a977c5`.
+
 ## [0.4.0] - 2026-07-27
 
 ### Added
