@@ -300,8 +300,8 @@ with a released client:
 
 | Component          | Version                   |
 | ------------------ | ------------------------- |
-| Buzz desktop       | `0.4.26`                  |
-| Buzz relay         | upstream commit `0096d71` |
+| Buzz desktop       | `0.5.0`                   |
+| Buzz relay         | upstream commit `4a977c5` |
 | Codex              | `0.145.0`                 |
 | Claude Code        | `2.1.220`                 |
 | Goose              | `1.44.0`                  |

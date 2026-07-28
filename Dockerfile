@@ -7,7 +7,7 @@
 # Upstream publishes the Linux desktop package only for AMD64; ARM64 builds the
 # same immutable source tag and exact commit natively.
 
-ARG BUZZ_RELAY_IMAGE=ghcr.io/block/buzz:sha-0096d71
+ARG BUZZ_RELAY_IMAGE=ghcr.io/block/buzz:sha-4a977c5
 FROM ${BUZZ_RELAY_IMAGE} AS buzz-relay
 
 FROM minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e AS minio
@@ -21,9 +21,9 @@ FROM rust:1.95-bookworm AS buzz-desktop
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 ARG TARGETARCH
-ARG BUZZ_VERSION=0.4.26
-ARG BUZZ_DEB_SHA256=1b520756ecfc28ad81981a2cd5cc6688f785f447b3f5d8d553544906f59bf521
-ARG BUZZ_SOURCE_SHA=0096d710ed2e6abab19aaf7cdc14e3ee603d7ec8
+ARG BUZZ_VERSION=0.5.0
+ARG BUZZ_DEB_SHA256=9674cf098eca88333e8d895ec9d0a5c56c796fbc358fe1087b645890b8e2faca
+ARG BUZZ_SOURCE_SHA=4a977c588a540be38bd8ddb268cd24437bac8165
 
 RUN set -eux; \
     arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
