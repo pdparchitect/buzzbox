@@ -1,6 +1,5 @@
 {
-  "schemaVersion": 1,
-  "version": "0.7.1",
+  "schemaVersion": 2,
   "id": "2784cf32-591a-4ba7-9c26-64ce6deeba55",
   "slug": "buzzbox",
   "name": "Buzzbox",
@@ -21,12 +20,15 @@
       }
     ]
   },
-  "viewer": "kasmvnc",
-  "containerPort": 6901,
+  "interfaces": {
+    "desktop": {
+      "kind": "kasmweb",
+      "port": 6901,
+      "path": "/"
+    }
+  },
   "memory": "6g",
   "sharedMemory": "1g",
-  "resolutionEnvironment": "DESKTOP_RESOLUTION",
-  "resolution": "1920x1080",
   "environment": {
     "DESKTOP_VNC_STATS": "false"
   },

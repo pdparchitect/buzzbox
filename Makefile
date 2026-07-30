@@ -13,7 +13,7 @@ BUZZ_VERSION ?= 0.5.2
 BUZZ_DEB_SHA256 ?= 3f022bc31ed579e045946e6acab8483639bcb94e62c1e70f67b97b22f8f879c5
 BUZZ_SOURCE_SHA ?= 3e48f1b2365d326ee1c9582448d86a99b44ecd5d
 BUZZ_RELAY_IMAGE ?= ghcr.io/block/buzz:sha-3e48f1b
-DESKTOP_IMAGE ?= ghcr.io/pdparchitect/launcher-image-base-desktop:0.1.0
+DESKTOP_IMAGE ?= ghcr.io/pdparchitect/launcher-image-base-desktop:0.1.1
 CODEX_VERSION ?= 0.145.0
 CLAUDE_CODE_VERSION ?= 2.1.220
 CODEX_ACP_VERSION ?= 1.1.7
@@ -30,7 +30,6 @@ RELAY_CONTAINER_PORT ?= 3000
 HEALTH_PORT ?= 8080
 BUZZ_NETWORK ?=
 PUBLIC_RELAY_URL ?=
-RESOLUTION ?= 1920x1080
 VNC_STATS ?= false
 VOLUME_PREFIX ?= buzzbox
 
@@ -61,7 +60,7 @@ help:
 	@echo "  make url        Print the local desktop and relay URLs"
 	@echo "  make size-report  Report the graphical stack's share of the image"
 	@echo
-	@echo "Overrides: PORT=8080 RELAY_PORT=3001 RESOLUTION=1600x900"
+	@echo "Overrides: PORT=8080 RELAY_PORT=3001"
 	@echo "           PLATFORM=linux/arm64 (default: $(PLATFORM))"
 	@echo "           BUZZ_NETWORK=buzz-local"
 	@echo "           PUBLIC_RELAY_URL=ws://buzzbox:3000 VNC_STATS=true"
@@ -103,8 +102,7 @@ check:
 	@grep -q 'BUZZBOX_CODEX_SANDBOX_MODE' overlay/etc/desktop/startup.d/05-agent-runtime-trust
 	@grep -q 'BUZZBOX_CODEX_SANDBOX_MODE' README.md
 	@grep -q '\[ -n "$${PS1:-}" \]' overlay/etc/bash.bashrc.d/buzzbox-prompt.sh
-	@test "$$(jq -er '.schemaVersion' launcher/application.json)" = 1
-	@test "$$(jq -er '.version' launcher/application.json)" = "$$(tr -d '[:space:]' < VERSION)"
+	@test "$$(jq -er '.schemaVersion' launcher/application.json)" = 2
 	@! jq -e 'has("image")' launcher/application.json >/dev/null
 	@for asset in $$(jq -er '.media.icon, .media.cover, .media.screenshots[].source' launcher/application.json); do \
 		test -f "launcher/$$asset"; \
@@ -156,7 +154,6 @@ run: network
 			--publish "$(BIND_ADDRESS):$(PORT):6901" \
 			--publish "$(BIND_ADDRESS):$(RELAY_PORT):$(RELAY_CONTAINER_PORT)" \
 			$(PUBLIC_RELAY_ENV) \
-			--env "DESKTOP_RESOLUTION=$(RESOLUTION)" \
 			--env "DESKTOP_VNC_STATS=$(VNC_STATS)" \
 			--volume "$(VOLUME_PREFIX)-workspace:/workspace" \
 			--volume "$(VOLUME_PREFIX)-services:/var/lib/buzzbox" \

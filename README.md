@@ -177,9 +177,9 @@ Two consequences are worth knowing:
 - The desktop user is `agent`, homed at `/home/agent`, and desktop logs live in
   `/var/log/launcher-desktop`. Buzz's own service state stays in
   `/var/lib/buzzbox`.
-- Desktop-level settings use the base's names — `DESKTOP_RESOLUTION`,
-  `DESKTOP_VNC_STATS`, `DESKTOP_TITLE`. Buzz-level settings keep their
-  `BUZZBOX_*` and `BUZZ_*` names.
+- Desktop-level settings use the base's names — `DESKTOP_VNC_STATS` and
+  `DESKTOP_TITLE`. Buzz-level settings keep their `BUZZBOX_*` and `BUZZ_*`
+  names.
 
 To build against a different base, override `DESKTOP_IMAGE`:
 
@@ -310,10 +310,10 @@ make status
 make stop
 ```
 
-To change the browser port, published relay port, or desktop resolution:
+To change the browser port or published relay port:
 
 ```bash
-PORT=8080 RELAY_PORT=3001 RESOLUTION=1600x900 make up
+PORT=8080 RELAY_PORT=3001 make up
 ```
 
 Two container-level variables are also read at boot. `BUZZBOX_STATE_DIR`

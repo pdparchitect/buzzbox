@@ -6,6 +6,24 @@ All notable changes to Buzzbox are documented here, following
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-07-30
+
+### Changed
+
+- Replace the single Launcher viewer and container port with the `desktop`
+  `kasmweb` interface required by application schema version 2.
+
+## [0.7.2] - 2026-07-30
+
+### Changed
+
+- Remove fixed desktop-resolution configuration from the Launcher manifest
+  and local Docker workflow. KasmVNC now sizes the remote desktop for the
+  connected viewer.
+- Remove the unused product-version copy from the Launcher application
+  document. The root `VERSION` file remains authoritative.
+- Update the shared Launcher desktop base to `0.1.1`.
+
 ## [0.7.1] - 2026-07-30
 
 ### Changed
