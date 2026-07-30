@@ -18,7 +18,10 @@ fi
         git-credential-nostr buzz-relay buzz-admin buzz-pair-relay \
         codex codex-acp claude claude-agent-acp goose chromium \
         minio mc; do
-        command -v "$command" >/dev/null
+        command -v "$command" >/dev/null || {
+            echo "[smoke] FAILED: $command is not on PATH" >&2
+            exit 1
+        }
     done
 
     case "$(dpkg --print-architecture)" in
@@ -39,13 +42,53 @@ fi
     buzz-acp --help >/dev/null
     goose --version
     chromium --version
-    redis-cli ping | grep -q PONG
-    pg_isready -h 127.0.0.1 -p 5432 -U buzz >/dev/null
-    curl -fsS http://127.0.0.1:9000/minio/health/live >/dev/null
-    curl -fsS http://127.0.0.1:8080/_readiness >/dev/null
-    curl -fsS http://127.0.0.1:6901/ >/dev/null
-    pgrep -x buzz-relay >/dev/null
-    pgrep -f "(^|/)buzz-desktop($| )" >/dev/null
+
+    # Every check below is named, because this block runs under `bash -ec` and
+    # a bare failing command exits 1 with nothing on stderr - which is all a CI
+    # log shows for an arch this cannot be reproduced on locally.
+    check() {
+        local label="$1"
+        shift
+        if ! "$@" >/dev/null 2>&1; then
+            echo "[smoke] FAILED: $label" >&2
+            return 1
+        fi
+    }
+
+    # Services the entrypoint brought up before the desktop.
+    check "redis responds to ping" \
+        bash -c "redis-cli ping | grep -q PONG"
+    check "postgres accepts connections" \
+        pg_isready -h 127.0.0.1 -p 5432 -U buzz
+    check "minio is live" \
+        curl -fsS http://127.0.0.1:9000/minio/health/live
+    check "buzz relay reports ready" \
+        curl -fsS "http://127.0.0.1:${BUZZ_HEALTH_PORT:-8080}/_readiness"
+    check "kasmvnc serves the desktop" \
+        curl -fsS http://127.0.0.1:6901/
+
+    # Liveness of the two long-running processes. These are polled rather than
+    # sampled once: the relay is started before the session and buzz-desktop
+    # from inside it, so a single check here races session startup - and does so
+    # differently per architecture, because the native ARM64 build of the Tauri
+    # desktop starts on its own schedule.
+    await() {
+        local label="$1"
+        shift
+        local attempt
+        for attempt in $(seq 1 30); do
+            if "$@" >/dev/null 2>&1; then
+                return 0
+            fi
+            sleep 1
+        done
+        echo "[smoke] FAILED: $label did not appear within 30s" >&2
+        ps -eo user,pid,comm >&2 || true
+        return 1
+    }
+
+    await "the buzz-relay process" pgrep -x buzz-relay
+    await "the buzz-desktop process" pgrep -f "(^|/)buzz-desktop($| )"
 '
 
 desktop_ready=false
