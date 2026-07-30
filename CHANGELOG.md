@@ -6,6 +6,13 @@ All notable changes to Buzzbox are documented here, following
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-07-30
+
+### Changed
+
+- Publish the Launcher application definition and artwork as an OCI artifact
+  attached to the final multi-architecture image digest.
+
 ## [0.7.0] - 2026-07-30
 
 ### Changed
