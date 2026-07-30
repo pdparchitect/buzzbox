@@ -3,7 +3,7 @@
   <menu id="root-menu" label="Buzzbox">
     <item label="Welcome">
       <action name="Execute">
-        <command>kitty --title "Buzzbox" --override remember_window_size=no --override initial_window_width=100c --override initial_window_height=30c -e welcome</command>
+        <command>desktop-welcome</command>
       </action>
     </item>
     <separator />
@@ -82,12 +82,12 @@
     <menu id="service-menu" label="Services">
       <item label="Buzz Relay Log">
         <action name="Execute">
-          <command>kitty --title "Buzz Relay" -e tail -n 200 -f /var/log/buzzbox/buzz-relay.log</command>
+          <command>kitty --title "Buzz Relay" -e tail -n 200 -f /var/log/launcher-desktop/buzz-relay.log</command>
         </action>
       </item>
-      <item label="Buzzbox Log Directory">
+      <item label="Log Directory">
         <action name="Execute">
-          <command>kitty -e ranger /var/log/buzzbox</command>
+          <command>kitty -e ranger /var/log/launcher-desktop</command>
         </action>
       </item>
     </menu>

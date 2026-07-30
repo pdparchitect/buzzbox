@@ -6,7 +6,7 @@ project_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 temporary_dir="$(mktemp -d)"
 trap 'rm -rf "$temporary_dir"' EXIT
 
-helper="$project_dir/shell/agent-runtime-login"
+helper="$project_dir/overlay/usr/local/bin/agent-runtime-login"
 runtime_log="$temporary_dir/runtime.log"
 export runtime_log
 
@@ -77,9 +77,9 @@ fi
 # codex-acp consults the same trust_level. The workspace is recorded as trusted
 # at boot so a harness started against it behaves the same way here as it does
 # in Buzznode.
-grep -Fq 'BUZZBOX_TRUST_WORKSPACE' "$project_dir/init.sh"
-grep -Fq 'trust_level = "trusted"' "$project_dir/init.sh"
-grep -Fq 'hasTrustDialogAccepted' "$project_dir/init.sh"
-grep -Fq 'BUZZBOX_HARNESS_WORKDIR:-/workspace' "$project_dir/init.sh"
+grep -Fq 'BUZZBOX_TRUST_WORKSPACE' "$project_dir/overlay/etc/desktop/startup.d/05-agent-runtime-trust"
+grep -Fq 'trust_level = "trusted"' "$project_dir/overlay/etc/desktop/startup.d/05-agent-runtime-trust"
+grep -Fq 'hasTrustDialogAccepted' "$project_dir/overlay/etc/desktop/startup.d/05-agent-runtime-trust"
+grep -Fq 'BUZZBOX_HARNESS_WORKDIR:-/workspace' "$project_dir/overlay/etc/desktop/startup.d/05-agent-runtime-trust"
 
 echo "Agent runtime login tests passed."

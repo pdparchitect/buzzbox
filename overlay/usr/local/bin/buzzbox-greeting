@@ -1,5 +1,8 @@
 #!/bin/bash
 # First-launch guide for Buzzbox.
+#
+# Printed by desktop-welcome, which owns the terminal and the shell that
+# follows it. This only writes the greeting.
 
 clear
 
@@ -37,8 +40,7 @@ ${D}    1. Finish Buzz's local identity and community setup.
     Run: buzznode-enrollment create
 
     Right-click opens the Buzzbox menu. Ctrl+Shift+T toggles tiling.
+    Ctrl+Shift+G raises the Buzz desktop.
     File Manager opens /workspace. Press 'W for Workspace or 'H for Home.${R}
 
 EOF
-
-exec bash -l

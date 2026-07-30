@@ -3,11 +3,19 @@
 # Buzzbox - a browser-accessible Buzz desktop, local relay, and coding
 # agent workstation.
 #
+# The Openbox/KasmVNC desktop, its browser, and the Ubuntu/Node foundation
+# under it all come from the Launcher desktop base. Nothing about the desktop
+# is configured here: branding and product programs are installed through
+# overlay/, which is copied over the base's defaults, and the Buzz stack is
+# started from the base entrypoint's /etc/desktop/startup.d hook.
+#
 # The desktop release and relay image are pinned to the same upstream commit.
 # Upstream publishes the Linux desktop package only for AMD64; ARM64 builds the
 # same immutable source tag and exact commit natively.
 
-ARG BUZZ_RELAY_IMAGE=ghcr.io/block/buzz:sha-4a977c5
+ARG DESKTOP_IMAGE=ghcr.io/pdparchitect/launcher-image-base-desktop:0.1.0
+
+ARG BUZZ_RELAY_IMAGE=ghcr.io/block/buzz:sha-3e48f1b
 FROM ${BUZZ_RELAY_IMAGE} AS buzz-relay
 
 FROM minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e AS minio
@@ -21,9 +29,9 @@ FROM rust:1.95-bookworm AS buzz-desktop
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 ARG TARGETARCH
-ARG BUZZ_VERSION=0.5.0
-ARG BUZZ_DEB_SHA256=9674cf098eca88333e8d895ec9d0a5c56c796fbc358fe1087b645890b8e2faca
-ARG BUZZ_SOURCE_SHA=4a977c588a540be38bd8ddb268cd24437bac8165
+ARG BUZZ_VERSION=0.5.2
+ARG BUZZ_DEB_SHA256=3f022bc31ed579e045946e6acab8483639bcb94e62c1e70f67b97b22f8f879c5
+ARG BUZZ_SOURCE_SHA=3e48f1b2365d326ee1c9582448d86a99b44ecd5d
 
 RUN set -eux; \
     arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
@@ -31,32 +39,18 @@ RUN set -eux; \
     if [ "$arch" = "arm64" ]; then \
         apt-get install -y --no-install-recommends \
             ca-certificates curl git gnupg \
-            build-essential file \
+            build-essential file cmake \
             libasound2-dev libayatana-appindicator3-dev libgtk-3-dev \
             librsvg2-dev libssl-dev libwebkit2gtk-4.1-dev libxdo-dev \
             patchelf pkg-config xdg-utils; \
+        curl -fsSL https://deb.nodesource.com/setup_24.x | bash -; \
+        apt-get install -y --no-install-recommends nodejs; \
+        corepack enable; \
+        corepack prepare pnpm@10.13.1 --activate; \
     else \
         apt-get install -y --no-install-recommends ca-certificates curl; \
     fi; \
     rm -rf /var/lib/apt/lists/*
-
-RUN set -eux; \
-    arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
-    if [ "$arch" = "arm64" ]; then \
-        apt-get update; \
-        apt-get install -y --no-install-recommends cmake; \
-        rm -rf /var/lib/apt/lists/*; \
-    fi
-
-RUN set -eux; \
-    arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
-    if [ "$arch" = "arm64" ]; then \
-        curl -fsSL https://deb.nodesource.com/setup_24.x | bash -; \
-        apt-get install -y --no-install-recommends nodejs; \
-        rm -rf /var/lib/apt/lists/*; \
-        corepack enable; \
-        corepack prepare pnpm@10.13.1 --activate; \
-    fi
 
 RUN set -eux; \
     arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
@@ -73,15 +67,6 @@ RUN set -eux; \
         cd /tmp/buzz; \
         test "$(git rev-parse HEAD)" = "$BUZZ_SOURCE_SHA"; \
         pnpm install --frozen-lockfile; \
-    else \
-        echo "Buzzbox does not support linux/$arch" >&2; \
-        exit 1; \
-    fi
-
-RUN set -eux; \
-    arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
-    if [ "$arch" = "arm64" ]; then \
-        cd /tmp/buzz; \
         CARGO_BUILD_JOBS=2 cargo build --locked --release \
             -p buzz-cli \
             -p buzz-acp \
@@ -89,11 +74,6 @@ RUN set -eux; \
             -p buzz-dev-mcp \
             -p git-credential-nostr; \
         ./scripts/bundle-sidecars.sh; \
-    fi
-
-RUN set -eux; \
-    arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
-    if [ "$arch" = "arm64" ]; then \
         cd /tmp/buzz/desktop; \
         CARGO_BUILD_JOBS=2 CMAKE_POLICY_VERSION_MINIMUM=3.5 \
             pnpm tauri build --ci --bundles deb; \
@@ -102,58 +82,63 @@ RUN set -eux; \
         test "${#packages[@]}" -eq 1; \
         install -m 0644 "${packages[0]}" /out/Buzz.deb; \
         dpkg-deb --info /out/Buzz.deb >/dev/null; \
+    else \
+        echo "Buzzbox does not support linux/$arch" >&2; \
+        exit 1; \
     fi
 
-# ═══════════════════════════════════════════════════════════════════
-# Stage: core - shared runtime/tooling baseline for agent workloads.
-# ═══════════════════════════════════════════════════════════════════
-FROM ubuntu:24.04 AS core
+FROM ${DESKTOP_IMAGE}
+
+USER root
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 ARG TARGETARCH
-ENV DEBIAN_FRONTEND=noninteractive
 
-RUN arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
-    case "$arch" in \
-        amd64|arm64) ;; \
-        *) echo "Buzzbox does not support linux/$arch" >&2; exit 1 ;; \
-    esac
-
-# Core tools, local Buzz service dependencies, and desktop runtime libraries.
+# Backing services for the local Buzz stack, plus the GTK/WebKit runtime the
+# Tauri desktop links against. The desktop base already carries the browser's
+# own libraries; these are the ones only buzz-desktop needs. xclip backs the
+# enrollment bundle's clipboard hand-off.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    bash coreutils curl git openssh-client jq socat wget ca-certificates sudo \
-    tar zip unzip file procps openssl gnupg \
-    dnsutils iproute2 haveged \
-    sqlite3 \
-    python3 python3-pip python-is-python3 \
-    python3-numpy python3-pandas python3-scipy python3-requests \
-    ipython3 \
-    vim ripgrep git-lfs \
     postgresql postgresql-client redis-server \
-    libwebkit2gtk-4.1-0 libgtk-3-0 \
-    libayatana-appindicator3-1 librsvg2-2 \
-    && rm -rf /var/lib/apt/lists/*
+    libwebkit2gtk-4.1-0 libgtk-3-0 libayatana-appindicator3-1 librsvg2-2 \
+    xclip \
+    python3-numpy python3-pandas python3-scipy python3-requests ipython3 \
+    && rm -rf /var/lib/apt/lists/* && \
+    ln -sf /usr/bin/ipython3 /usr/bin/ipython
 
-# Node.js 24, matching the current Buzz development toolchain.
-RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && \
-    apt-get install -y --no-install-recommends nodejs && \
-    rm -rf /var/lib/apt/lists/* && \
-    node --version && npm --version
+# Docker and GitHub CLIs remain available for coding-agent workflows. The local
+# Buzz stack does not require a host Docker socket.
+RUN curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor \
+        -o /usr/share/keyrings/docker-archive-keyring.gpg && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu noble stable" \
+        > /etc/apt/sources.list.d/docker.list && \
+    curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+        -o /usr/share/keyrings/githubcli-archive-keyring.gpg && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+        > /etc/apt/sources.list.d/github-cli.list && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends docker-ce-cli gh && \
+    rm -rf /var/lib/apt/lists/*
 
-RUN corepack enable && corepack prepare pnpm@10.13.1 --activate && \
-    pnpm --version
-
-# Coding CLIs and the ACP adapters that make them discoverable by Buzz.
+# Coding CLIs and the ACP adapters that make them discoverable by Buzz. Node
+# and npm come from the runtime layer in the base chain.
+#
+# npm's cache follows HOME, which the desktop base points at the session user's
+# home. Without an explicit cache directory this root-run install leaves
+# /home/agent/.npm owned by root, and then kitty cannot start and the session
+# opens with no terminal at all.
 ARG CODEX_VERSION=0.145.0
 ARG CLAUDE_CODE_VERSION=2.1.220
 ARG CODEX_ACP_VERSION=1.1.7
 ARG CLAUDE_ACP_VERSION=0.62.0
+ENV npm_config_cache=/tmp/npm-cache
 RUN npm install -g \
-    "@openai/codex@${CODEX_VERSION}" \
-    "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
-    "@agentclientprotocol/codex-acp@${CODEX_ACP_VERSION}" \
-    "@agentclientprotocol/claude-agent-acp@${CLAUDE_ACP_VERSION}" && \
+        "@openai/codex@${CODEX_VERSION}" \
+        "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
+        "@agentclientprotocol/codex-acp@${CODEX_ACP_VERSION}" \
+        "@agentclientprotocol/claude-agent-acp@${CLAUDE_ACP_VERSION}" && \
+    rm -rf /tmp/npm-cache && \
     codex --version && \
     claude --version && \
     codex-acp --version && \
@@ -181,14 +166,6 @@ RUN arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
     goose --version && \
     goose acp --help >/dev/null
 
-# Mike Farah yq.
-ARG YQ_VERSION=4.44.6
-RUN arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
-    curl -fsSL "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_${arch}" \
-        -o /usr/local/bin/yq && \
-    chmod +x /usr/local/bin/yq && \
-    yq --version
-
 # Buzz relay, administration utilities, and its bundled web clients. The source
 # stage is immutable through BUZZ_RELAY_IMAGE in the Makefile.
 COPY --from=buzz-relay /usr/local/bin/buzz-relay /usr/local/bin/buzz-relay
@@ -200,6 +177,9 @@ COPY --from=minio-client /usr/bin/mc /usr/local/bin/mc
 
 # Install the architecture's package produced above. Both variants include
 # buzz-desktop and the five sidecars at the same paths.
+ARG BUZZ_VERSION=0.5.2
+ARG BUZZ_SOURCE_SHA=3e48f1b2365d326ee1c9582448d86a99b44ecd5d
+ARG BUZZ_SOURCE_URL=https://github.com/block/buzz
 COPY --from=buzz-desktop /out/Buzz.deb /tmp/Buzz.deb
 RUN set -eux; \
     apt-get update; \
@@ -213,255 +193,79 @@ RUN set -eux; \
     command -v buzz-dev-mcp; \
     command -v git-credential-nostr
 
-# Required directories.
-RUN mkdir -p /data /outputs /workspace /var/lib/buzzbox /var/log/buzzbox
-
-# Alias ipython to ipython3 and pip to pip3 for consistency.
-RUN ln -sf /usr/bin/ipython3 /usr/bin/ipython && \
-    ln -sf /usr/bin/pip3 /usr/bin/pip
-
-# ═══════════════════════════════════════════════════════════════════
-# Stage: base - desktop UI substrate layered on top of core.
-# ═══════════════════════════════════════════════════════════════════
-FROM core AS base
-
-# KasmVNC supplies its own X server (Xvnc), so the `xorg` metapackage is not
-# installed: it would add xserver-xorg-core, input/video drivers, keyboard-
-# configuration, and udev/systemd for hardware this container never has.
-# `x11-xserver-utils` is skipped for the same reason - its only consumer would
-# be the xrdb call in KasmVNC's generated xstartup, and xstartup is replaced
-# below with `exec openbox-session`. Together they cost ~90 MiB.
-# xauth, xkb-data, and x11-xkb-utils are listed explicitly even though
-# kasmvncserver depends on them, so an autoremove can never take them out.
-# xfonts-base supplies the core font path Xvnc is started with.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    xdg-utils ssl-cert \
-    xauth xkb-data x11-xkb-utils xfonts-base \
-    xterm dbus-x11 x11-utils \
-    scrot \
-    openbox obconf tint2 kitty ranger feh picom htop xdotool wmctrl xclip \
-    fonts-noto fonts-noto-color-emoji \
-    libnss3 libatk1.0-0t64 libatk-bridge2.0-0t64 libcups2t64 libdrm2 \
-    libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 \
-    libpango-1.0-0 libasound2t64 libxshmfence1 \
-    && rm -rf /var/lib/apt/lists/*
-
-# Cortile provides optional dynamic tiling on top of Openbox.
-ARG CORTILE_VERSION=2.5.2
-RUN arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
-    case "$arch" in \
-        amd64) cortile_arch=amd64 ;; \
-        arm64) cortile_arch=arm64 ;; \
-        *) echo "Unsupported Cortile architecture: $arch" >&2; exit 1 ;; \
-    esac; \
-    tmp_dir="$(mktemp -d)"; \
-    curl -fsSL \
-        "https://github.com/leukipp/cortile/releases/download/v${CORTILE_VERSION}/cortile_${CORTILE_VERSION}_linux_${cortile_arch}.tar.gz" \
-        | tar -xz -C "$tmp_dir"; \
-    install -m 0755 "$tmp_dir/cortile" /usr/local/bin/cortile; \
-    rm -rf "$tmp_dir"
-
-# KasmVNC exposes the desktop in a browser.
-ARG KASMVNC_VERSION=1.4.0
-RUN arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
-    curl -fsSL \
-        "https://github.com/kasmtech/KasmVNC/releases/download/v${KASMVNC_VERSION}/kasmvncserver_noble_${KASMVNC_VERSION}_${arch}.deb" \
-        -o /tmp/kasmvnc.deb && \
-    apt-get update && \
-    apt-get install -y --no-install-recommends /tmp/kasmvnc.deb && \
-    rm -f /tmp/kasmvnc.deb && \
-    rm -rf /var/lib/apt/lists/*
-
-# Docker and GitHub CLIs remain available for coding-agent workflows. The local
-# Buzz stack does not require a host Docker socket.
-RUN curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor \
-        -o /usr/share/keyrings/docker-archive-keyring.gpg && \
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu noble stable" \
-        > /etc/apt/sources.list.d/docker.list && \
-    curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
-        -o /usr/share/keyrings/githubcli-archive-keyring.gpg && \
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
-        > /etc/apt/sources.list.d/github-cli.list && \
-    apt-get update && \
-    apt-get install -y --no-install-recommends docker-ce-cli gh && \
-    rm -rf /var/lib/apt/lists/*
-
-# Google does not publish Chrome for Linux ARM64. Keep Chrome on AMD64 and use
-# Debian's signed Chromium package on ARM64 behind the same Buzzbox launcher.
-RUN set -eux; \
-    arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
-    if [ "$arch" = "amd64" ]; then \
-        curl -fsSL https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
-            -o /tmp/browser.deb; \
-        apt-get update; \
-        apt-get install -y --no-install-recommends /tmp/browser.deb; \
-        rm -f /tmp/browser.deb; \
-    else \
-        mkdir -p /etc/apt/keyrings; \
-        curl -fsSL https://ftp-master.debian.org/keys/archive-key-12.asc \
-            -o /etc/apt/keyrings/debian-archive-key-12.asc; \
-        printf '%s\n' \
-            'deb [arch=arm64 signed-by=/etc/apt/keyrings/debian-archive-key-12.asc] https://deb.debian.org/debian bookworm main' \
-            > /etc/apt/sources.list.d/debian-bookworm.list; \
-        printf '%s\n' \
-            'Package: *' \
-            'Pin: release n=bookworm' \
-            'Pin-Priority: 100' \
-            > /etc/apt/preferences.d/debian-bookworm; \
-        apt-get update; \
-        apt-get install -y --no-install-recommends chromium; \
-        rm -f \
-            /etc/apt/keyrings/debian-archive-key-12.asc \
-            /etc/apt/preferences.d/debian-bookworm \
-            /etc/apt/sources.list.d/debian-bookworm.list; \
-    fi; \
-    rm -rf /var/lib/apt/lists/*
-
-# ═══════════════════════════════════════════════════════════════════
-# Stage: buzzbox - complete independently runnable environment.
-# ═══════════════════════════════════════════════════════════════════
-FROM base AS buzzbox
-
-RUN if id -u agent >/dev/null 2>&1; then \
-        usermod -d /home/buzzbox -m agent; \
-    elif id -u ubuntu >/dev/null 2>&1; then \
-        usermod -l agent -d /home/buzzbox -m ubuntu && groupmod -n agent ubuntu; \
-    else \
-        groupadd --system agent && \
-        useradd --system --create-home --home-dir /home/buzzbox \
-            --gid agent --shell /bin/bash agent; \
-    fi && \
-    mkdir -p \
-        /home/buzzbox/.vnc \
-        /home/buzzbox/.config \
-        /home/buzzbox/.local/share/applications \
-        /home/buzzbox/.buzz \
-        /home/buzzbox/.codex \
-        /home/buzzbox/.claude \
-        /workspace \
+# The state directory is a volume, so a rebuilt image resumes with its relay
+# identity, database, and object store intact. Creating the agent-runtime homes
+# now means the entrypoint's ownership pass has something to normalise on a
+# brand-new volume.
+RUN mkdir -p \
         /var/lib/buzzbox \
-        /var/log/buzzbox && \
-    chown -R agent:agent \
-        /home/buzzbox \
-        /workspace \
-        /var/lib/buzzbox \
-        /var/log/buzzbox
+        /home/agent/.buzz \
+        /home/agent/.codex \
+        /home/agent/.claude && \
+    rm -rf /home/agent/.cache /home/agent/.npm && \
+    chown -R agent:agent /home/agent /var/lib/buzzbox
 
-ENV HOME=/home/buzzbox \
-    BROWSER=chromium \
+# Product branding and the programs that drive the Buzz stack. Everything under
+# overlay/ is installed over the base's defaults, so a file here wins without
+# the base knowing this product exists.
+COPY overlay /
+RUN chmod 0755 \
+        /etc/desktop/session.d/10-buzz-desktop \
+        /etc/desktop/startup.d/05-agent-runtime-trust \
+        /etc/desktop/startup.d/10-buzz-stack \
+        /usr/local/bin/agent-runtime-login \
+        /usr/local/bin/buzzbox \
+        /usr/local/bin/buzzbox-greeting \
+        /usr/local/bin/buzznode-enrollment \
+        /usr/local/bin/desktop-harness \
+        /usr/local/bin/desktop-panel-status \
+        /usr/local/bin/desktop-welcome
+
+# Rebrand the KasmVNC client. The base already patched it, so this replaces the
+# brand rather than injecting the asset links a second time.
+RUN kasm-patch "Buzzbox"
+
+# DESKTOP_PERSISTENT_PATHS is the base entrypoint's contract: these are created
+# and ownership-normalised before the session starts, and they are the paths
+# declared as volumes below.
+#
+# BUZZ_RELAY_PORT and BUZZ_HEALTH_PORT are declared once here and read by
+# everything that needs them - the startup hook that launches the relay, the
+# session program that waits for it, the panel status, and the health check
+# below - so the port lives in one place rather than in six.
+ENV DESKTOP_TITLE="Buzzbox" \
+    DESKTOP_PERSISTENT_PATHS="/var/lib/buzzbox /home/agent/.buzz /home/agent/.codex /home/agent/.claude" \
+    BUZZ_RELAY_PORT=3000 \
+    BUZZ_HEALTH_PORT=8080 \
     BUZZ_RELAY_URL=ws://127.0.0.1:3000 \
     BUZZ_WEB_DIR=/srv/buzz/web \
     BUZZ_ADMIN_WEB_DIR=/srv/buzz/admin-web
-ENV GTK_THEME=Buzzbox
-# Chrome and Chromium ask GTK for embedded symbolic window-control resources.
-# Overlay only those four resources so their custom frames use the exact
-# Openbox glyph masks.
-ENV G_RESOURCE_OVERLAYS=/org/gtk/libgtk=/usr/share/buzzbox/gtk-overlay
 
-# Browser popup menus come from Linux's native color pipeline rather than
-# extension-theme colors. A GTK system theme therefore styles the menus,
-# dialogs, toolbar, tabs, and omnibox as one coherent near-black surface.
-COPY gtk/Buzzbox /usr/share/themes/Buzzbox
-COPY gtk/generate-resource-overlay.py /tmp/generate-gtk-resource-overlay.py
-COPY openbox/theme /tmp/openbox-theme
-# Generate real symbolic PNGs directly from the Openbox XBM source assets.
-RUN python3 /tmp/generate-gtk-resource-overlay.py \
-        /tmp/openbox-theme /usr/share/buzzbox/gtk-overlay && \
-    rm -rf /tmp/generate-gtk-resource-overlay.py /tmp/openbox-theme
+LABEL org.opencontainers.image.title="Buzzbox" \
+    org.opencontainers.image.description="Buzz desktop, local relay, and coding agent workstation in a Launcher-managed browser desktop" \
+    org.opencontainers.image.source="https://github.com/pdparchitect/buzzbox" \
+    dev.pdparchitect.launcher.upstream.source="${BUZZ_SOURCE_URL}" \
+    dev.pdparchitect.launcher.upstream.version="${BUZZ_VERSION}" \
+    dev.pdparchitect.launcher.upstream.revision="${BUZZ_SOURCE_SHA}"
 
-RUN echo "agent ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/agent && \
-    chmod 0440 /etc/sudoers.d/agent && \
-    touch /home/buzzbox/.sudo_as_admin_successful /home/buzzbox/.hushlogin && \
-    chown agent:agent \
-        /home/buzzbox/.sudo_as_admin_successful \
-        /home/buzzbox/.hushlogin
-
-# KasmVNC UI customisation.
-COPY kasm/custom.css /usr/share/kasmvnc/www/assets/custom.css
-COPY kasm/favicon.svg /usr/share/kasmvnc/www/assets/favicon.svg
-COPY kasm/patch.sh /tmp/kasm-patch.sh
-RUN chmod +x /tmp/kasm-patch.sh && /tmp/kasm-patch.sh && rm /tmp/kasm-patch.sh
-
-# Match the Buzz website's chartreuse background and subtle dot grid.
-COPY wallpaper/buzz-grid.svg /usr/share/backgrounds/buzz-grid.svg
-
-# Browser preferences. `system_theme: 1` selects GTK on Linux; unlike an
-# extension theme, it also reaches native menus and other popup surfaces.
-RUN for config_dir in google-chrome chromium; do \
-        mkdir -p "/home/buzzbox/.config/$config_dir/Default"; \
-        printf '{\n  "browser": {\n    "has_seen_welcome_page": true,\n    "check_default_browser": false\n  },\n  "bookmark_bar": { "show_on_all_tabs": false },\n  "distribution": {\n    "skip_first_run_ui": true,\n    "show_welcome_page": false,\n    "import_bookmarks": false,\n    "make_chrome_default_for_user": false,\n    "suppress_first_run_default_browser_prompt": true\n  },\n  "extensions": {\n    "theme": {\n      "system_theme": 1\n    }\n  }\n}' \
-            > "/home/buzzbox/.config/$config_dir/Default/Preferences"; \
-        touch "/home/buzzbox/.config/$config_dir/First Run"; \
-    done && \
-    chown -R agent:agent \
-        /home/buzzbox/.config/google-chrome \
-        /home/buzzbox/.config/chromium
-
-# Suppress the default-browser prompt via managed policy. Do not set
-# BrowserThemeColor here: that policy overrides Chrome's GTK system theme.
-RUN mkdir -p \
-        /etc/opt/chrome/policies/managed \
-        /etc/chromium/policies/managed && \
-    printf '{\n  "DefaultBrowserSettingEnabled": false,\n  "BrowserSignin": 0,\n  "HomepageLocation": "file:///opt/browser/index.html",\n  "HomepageIsNewTabPage": false,\n  "ShowHomeButton": true\n}\n' \
-        > /etc/opt/chrome/policies/managed/buzzbox-policy.json && \
-    cp /etc/opt/chrome/policies/managed/buzzbox-policy.json \
-        /etc/chromium/policies/managed/buzzbox-policy.json
-
-COPY openbox/rc.xml /etc/xdg/openbox/rc.xml
-COPY openbox/menu.xml /etc/xdg/openbox/menu.xml
-COPY openbox/autostart /etc/xdg/openbox/autostart
-COPY openbox/theme /usr/share/themes/Triste-Crimson/openbox-3
-COPY cortile/cortilectl /usr/local/bin/cortilectl
-COPY shell/welcome /usr/local/bin/welcome
-COPY shell/chromium /usr/local/bin/chromium
-COPY shell/buzzbox /usr/local/bin/buzzbox
-COPY shell/buzznode-enrollment /usr/local/bin/buzznode-enrollment
-COPY shell/agent-runtime-login /usr/local/bin/agent-runtime-login
-RUN mkdir -p /etc/bash.bashrc.d
-COPY shell/bashrc /etc/bash.bashrc.d/buzzbox-prompt.sh
-COPY browser /opt/browser
-COPY tint2/tint2rc /etc/xdg/tint2/tint2rc
-RUN chmod +x \
-        /etc/xdg/openbox/autostart \
-        /usr/local/bin/cortilectl \
-        /usr/local/bin/welcome \
-        /usr/local/bin/chromium \
-        /usr/local/bin/buzzbox \
-        /usr/local/bin/buzznode-enrollment \
-        /usr/local/bin/agent-runtime-login && \
-    echo '[ -d /etc/bash.bashrc.d ] && for f in /etc/bash.bashrc.d/*.sh; do . "$f"; done' \
-        >> /etc/bash.bashrc
-
-RUN mkdir -p /usr/share/xsessions && \
-    printf '[Desktop Entry]\nName=Openbox\nExec=openbox-session\nType=Application\n' \
-        > /usr/share/xsessions/openbox.desktop
-
-USER agent
-
-RUN mkdir -p "$HOME/.config/cortile"
-COPY --chown=agent:agent cortile/cortile-config.toml /home/buzzbox/.config/cortile/config.toml
-
-RUN printf '#!/bin/bash\nexec openbox-session\n' > "$HOME/.vnc/xstartup" && \
-    chmod +x "$HOME/.vnc/xstartup" && \
-    touch "$HOME/.vnc/.de-was-selected" && \
-    printf 'network:\n  ssl:\n    require_ssl: false\n  websocket_port: 6901\n' \
-        > "$HOME/.vnc/kasmvnc.yaml"
-
-USER root
-
-COPY init.sh /init
-RUN chmod +x /init
-
-EXPOSE 6901 3000
+# The desktop's own 6901 comes from the base, like every other Launcher
+# product. Only the relay is this image's to declare.
+EXPOSE 3000
 WORKDIR /workspace
-VOLUME ["/workspace", "/var/lib/buzzbox", "/home/buzzbox/.config", "/home/buzzbox/.local/share", "/home/buzzbox/.buzz", "/home/buzzbox/.codex", "/home/buzzbox/.claude"]
+VOLUME ["/workspace", "/var/lib/buzzbox", "/home/agent/.buzz", "/home/agent/.codex", "/home/agent/.claude"]
 
-# The relay probe only applies when the relay is expected. Disabling the relay
-# with BUZZ_RELAY_AUTOSTART is a supported configuration, and probing 8080
-# unconditionally would hold such a container unhealthy forever.
-HEALTHCHECK --interval=10s --timeout=5s --start-period=60s --retries=6 \
+# The base already health-checks the desktop on 6901, and this repeats that
+# probe because a HEALTHCHECK replaces the inherited one rather than adding to
+# it. The relay probe is the reason for overriding at all, and it only applies
+# when the relay is expected: disabling it with BUZZ_RELAY_AUTOSTART is a
+# supported configuration, and probing the health port unconditionally would
+# hold such a container unhealthy forever.
+#
+# Interval, timeout, and retries match the base. Only start-period differs: the
+# entrypoint brings PostgreSQL, Redis, MinIO, and the relay up before it starts
+# the desktop, so this image has further to go before its first healthy probe.
+HEALTHCHECK --interval=10s --timeout=3s --start-period=90s --retries=5 \
     CMD curl -fsS http://127.0.0.1:6901/ >/dev/null && \
         { [ "${BUZZ_RELAY_AUTOSTART:-true}" != "true" ] || \
-          curl -fsS http://127.0.0.1:8080/_readiness >/dev/null; } || exit 1
-
-ENTRYPOINT ["/init"]
+          curl -fsS "http://127.0.0.1:${BUZZ_HEALTH_PORT:-8080}/_readiness" \
+            >/dev/null; } || exit 1

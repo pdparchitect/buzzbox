@@ -1,0 +1,15 @@
+#!/bin/bash
+# The terminal the session opens with.
+#
+# The base opens a bare shell. Buzzbox opens the same shell behind its
+# first-launch guide, so the desktop explains itself before anything else
+# happens.
+
+set -euo pipefail
+
+exec kitty \
+    --title "${DESKTOP_TITLE:-Buzzbox}" \
+    --override remember_window_size=no \
+    --override initial_window_width=100c \
+    --override initial_window_height=34c \
+    -e bash -lc 'buzzbox-greeting; exec bash'
