@@ -9,10 +9,11 @@ NATIVE_ARCH := $(shell uname -m | sed \
 	-e 's/^aarch64$$/arm64/')
 PLATFORM ?= linux/$(NATIVE_ARCH)
 TARGETARCH ?= $(word 2,$(subst /, ,$(PLATFORM)))
-BUZZ_VERSION ?= 0.5.0
-BUZZ_DEB_SHA256 ?= 9674cf098eca88333e8d895ec9d0a5c56c796fbc358fe1087b645890b8e2faca
-BUZZ_SOURCE_SHA ?= 4a977c588a540be38bd8ddb268cd24437bac8165
-BUZZ_RELAY_IMAGE ?= ghcr.io/block/buzz:sha-4a977c5
+BUZZ_VERSION ?= 0.5.2
+BUZZ_DEB_SHA256 ?= 3f022bc31ed579e045946e6acab8483639bcb94e62c1e70f67b97b22f8f879c5
+BUZZ_SOURCE_SHA ?= 3e48f1b2365d326ee1c9582448d86a99b44ecd5d
+BUZZ_RELAY_IMAGE ?= ghcr.io/block/buzz:sha-3e48f1b
+DESKTOP_IMAGE ?= ghcr.io/pdparchitect/launcher-image-base-desktop:0.1.0
 CODEX_VERSION ?= 0.145.0
 CLAUDE_CODE_VERSION ?= 2.1.220
 CODEX_ACP_VERSION ?= 1.1.7
@@ -23,6 +24,10 @@ GOOSE_ARM64_SHA256 ?= da6cb005d421b0bdcb83fe8386ba5ae8060ef17adf64641a684d4fc4b9
 BIND_ADDRESS ?= 127.0.0.1
 PORT ?= 6903
 RELAY_PORT ?= 3000
+# The container-side ports. 6901 is the desktop base's and is not redeclared
+# here, the same way hermes, openclaw, and codex-pets do not redeclare it.
+RELAY_CONTAINER_PORT ?= 3000
+HEALTH_PORT ?= 8080
 BUZZ_NETWORK ?=
 PUBLIC_RELAY_URL ?=
 RESOLUTION ?= 1920x1080
@@ -62,13 +67,23 @@ help:
 	@echo "           PUBLIC_RELAY_URL=ws://buzzbox:3000 VNC_STATS=true"
 
 check:
-	bash -n init.sh openbox/autostart shell/buzzbox shell/chromium shell/welcome \
-		shell/agent-runtime-login shell/buzznode-enrollment \
+	bash -n \
+		overlay/etc/desktop/session.d/10-buzz-desktop \
+		overlay/etc/desktop/startup.d/05-agent-runtime-trust \
+		overlay/etc/desktop/startup.d/10-buzz-stack \
+		overlay/usr/local/bin/agent-runtime-login \
+		overlay/usr/local/bin/buzzbox \
+		overlay/usr/local/bin/buzzbox-greeting \
+		overlay/usr/local/bin/buzznode-enrollment \
+		overlay/usr/local/bin/desktop-harness \
+		overlay/usr/local/bin/desktop-panel-status \
+		overlay/usr/local/bin/desktop-welcome \
 		tests/test-agent-runtime-login.sh tests/test-buzznode-enrollment.sh \
 		tests/test-desktop-theme.sh tests/smoke-container.sh
 	bash tests/test-agent-runtime-login.sh
 	bash tests/test-buzznode-enrollment.sh
 	bash tests/test-desktop-theme.sh
+	@grep -q "^ARG DESKTOP_IMAGE=$(DESKTOP_IMAGE)$$" Dockerfile
 	@grep -q "^ARG BUZZ_VERSION=$(BUZZ_VERSION)$$" Dockerfile
 	@grep -q "^ARG BUZZ_DEB_SHA256=$(BUZZ_DEB_SHA256)$$" Dockerfile
 	@grep -q "^ARG BUZZ_SOURCE_SHA=$(BUZZ_SOURCE_SHA)$$" Dockerfile
@@ -80,22 +95,21 @@ check:
 	@grep -q "^ARG GOOSE_VERSION=$(GOOSE_VERSION)$$" Dockerfile
 	@grep -q "^ARG GOOSE_AMD64_SHA256=$(GOOSE_AMD64_SHA256)$$" Dockerfile
 	@grep -q "^ARG GOOSE_ARM64_SHA256=$(GOOSE_ARM64_SHA256)$$" Dockerfile
-	@grep -q 'assets/favicon.svg' kasm/patch.sh
-	@grep -q 'COPY kasm/favicon.svg /usr/share/kasmvnc/www/assets/favicon.svg' Dockerfile
-	@grep -q 'window.handle.width: 0' openbox/theme/themerc
-	@grep -q 'window.client.padding.width: 6' openbox/theme/themerc
-	@grep -q 'window.client.padding.height: 6' openbox/theme/themerc
-	@grep -q 'cd /workspace' shell/bashrc
-	@grep -q 'BUZZBOX_CODEX_SANDBOX_MODE' init.sh
+	@grep -q 'RUN kasm-patch "Buzzbox"' Dockerfile
+	@grep -q '    BUZZ_RELAY_PORT=$(RELAY_CONTAINER_PORT) \\' Dockerfile
+	@grep -q '    BUZZ_HEALTH_PORT=$(HEALTH_PORT) \\' Dockerfile
+	@grep -q '^EXPOSE $(RELAY_CONTAINER_PORT)$$' Dockerfile
+	@grep -q 'cd /workspace' overlay/etc/bash.bashrc.d/buzzbox-prompt.sh
+	@grep -q 'BUZZBOX_CODEX_SANDBOX_MODE' overlay/etc/desktop/startup.d/05-agent-runtime-trust
 	@grep -q 'BUZZBOX_CODEX_SANDBOX_MODE' README.md
-	@grep -q '\[ -n "$${PS1:-}" \]' shell/bashrc
-	@grep -q '<action name="Resize" />' openbox/rc.xml
+	@grep -q '\[ -n "$${PS1:-}" \]' overlay/etc/bash.bashrc.d/buzzbox-prompt.sh
 	@echo "Buzzbox metadata and shell syntax are valid."
 
 build:
 	$(DOCKER) build \
 		--platform "$(PLATFORM)" \
 		--build-arg "TARGETARCH=$(TARGETARCH)" \
+		--build-arg "DESKTOP_IMAGE=$(DESKTOP_IMAGE)" \
 		--build-arg "BUZZ_VERSION=$(BUZZ_VERSION)" \
 		--build-arg "BUZZ_DEB_SHA256=$(BUZZ_DEB_SHA256)" \
 		--build-arg "BUZZ_SOURCE_SHA=$(BUZZ_SOURCE_SHA)" \
@@ -134,17 +148,17 @@ run: network
 			$(GPU_DEVICE) \
 			$(NETWORK_ARG) \
 			--publish "$(BIND_ADDRESS):$(PORT):6901" \
-			--publish "$(BIND_ADDRESS):$(RELAY_PORT):3000" \
+			--publish "$(BIND_ADDRESS):$(RELAY_PORT):$(RELAY_CONTAINER_PORT)" \
 			$(PUBLIC_RELAY_ENV) \
-			--env "BUZZBOX_RESOLUTION=$(RESOLUTION)" \
-			--env "BUZZBOX_VNC_STATS=$(VNC_STATS)" \
+			--env "DESKTOP_RESOLUTION=$(RESOLUTION)" \
+			--env "DESKTOP_VNC_STATS=$(VNC_STATS)" \
 			--volume "$(VOLUME_PREFIX)-workspace:/workspace" \
 			--volume "$(VOLUME_PREFIX)-services:/var/lib/buzzbox" \
-			--volume "$(VOLUME_PREFIX)-config:/home/buzzbox/.config" \
-			--volume "$(VOLUME_PREFIX)-data:/home/buzzbox/.local/share" \
-			--volume "$(VOLUME_PREFIX)-nest:/home/buzzbox/.buzz" \
-			--volume "$(VOLUME_PREFIX)-codex:/home/buzzbox/.codex" \
-			--volume "$(VOLUME_PREFIX)-claude:/home/buzzbox/.claude" \
+			--volume "$(VOLUME_PREFIX)-config:/home/agent/.config" \
+			--volume "$(VOLUME_PREFIX)-data:/home/agent/.local/share" \
+			--volume "$(VOLUME_PREFIX)-nest:/home/agent/.buzz" \
+			--volume "$(VOLUME_PREFIX)-codex:/home/agent/.codex" \
+			--volume "$(VOLUME_PREFIX)-claude:/home/agent/.claude" \
 			"$(IMAGE)"; \
 	fi
 	@$(MAKE) --no-print-directory url
@@ -163,7 +177,7 @@ smoke:
 	for attempt in $$(seq 1 60); do \
 		if curl --fail --silent "http://$(BIND_ADDRESS):$(PORT)/index.html" >/dev/null && \
 			$(DOCKER) exec "$(CONTAINER)" curl --fail --silent \
-				http://127.0.0.1:8080/_readiness >/dev/null; then \
+				http://127.0.0.1:$(HEALTH_PORT)/_readiness >/dev/null; then \
 			ready=true; \
 			break; \
 		fi; \
@@ -190,11 +204,11 @@ logs:
 
 relay-log:
 	$(DOCKER) exec "$(CONTAINER)" \
-		tail --lines=200 --follow /var/log/buzzbox/buzz-relay.log
+		tail --lines=200 --follow /var/log/launcher-desktop/buzz-relay.log
 
 vnc-log:
 	$(DOCKER) exec "$(CONTAINER)" \
-		bash -c 'tail --lines=200 --follow /home/buzzbox/.vnc/*:1.log'
+		bash -c 'tail --lines=200 --follow /home/agent/.vnc/*:1.log'
 
 status:
 	@$(DOCKER) ps --all \

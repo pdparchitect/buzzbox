@@ -1,0 +1,30 @@
+#!/bin/bash
+# Open the Buzz desktop client when the session starts.
+#
+# Buzz is the primary application here, so it fills the desktop on every boot.
+# session.d rather than startup.d: this draws a window, so it needs DISPLAY and
+# a window manager, both of which only exist once the session is running.
+#
+# The relay is started by /etc/desktop/startup.d/10-buzz-stack, which the
+# entrypoint runs to completion before the session begins, so it is normally
+# already up. The wait covers the case where it was disabled or failed - Buzz
+# started against a relay that is not listening comes up with no workspace.
+
+set -uo pipefail
+
+log_file=/var/log/launcher-desktop/buzz-relay.log
+readiness_url="http://127.0.0.1:${BUZZ_HEALTH_PORT:-8080}/_readiness"
+
+if [ "${BUZZ_RELAY_AUTOSTART:-true}" != "true" ]; then
+    exec buzzbox
+fi
+
+for attempt in $(seq 1 30); do
+    if curl -fsS "$readiness_url" >/dev/null 2>&1; then
+        exec buzzbox
+    fi
+    sleep 1
+done
+
+exec kitty --title "Buzzbox" -e bash -lc \
+    "echo 'Buzz relay is unavailable. Run: sudo tail -f ${log_file}'; exec bash"

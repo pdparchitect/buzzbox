@@ -1,0 +1,10 @@
+#!/bin/bash
+# desktop-harness - Control-Shift-G.
+#
+# Buzzbox's primary interface is the Buzz desktop client, so the shortcut
+# raises it, starting it first if it is not already running. That is exactly
+# what the `buzzbox` command does.
+
+set -euo pipefail
+
+exec buzzbox

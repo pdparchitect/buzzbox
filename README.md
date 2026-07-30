@@ -47,11 +47,11 @@ docker run --detach \
   --publish 127.0.0.1:3000:3000 \
   --volume buzzbox-workspace:/workspace \
   --volume buzzbox-services:/var/lib/buzzbox \
-  --volume buzzbox-config:/home/buzzbox/.config \
-  --volume buzzbox-data:/home/buzzbox/.local/share \
-  --volume buzzbox-nest:/home/buzzbox/.buzz \
-  --volume buzzbox-codex:/home/buzzbox/.codex \
-  --volume buzzbox-claude:/home/buzzbox/.claude \
+  --volume buzzbox-config:/home/agent/.config \
+  --volume buzzbox-data:/home/agent/.local/share \
+  --volume buzzbox-nest:/home/agent/.buzz \
+  --volume buzzbox-codex:/home/agent/.codex \
+  --volume buzzbox-claude:/home/agent/.claude \
   ghcr.io/pdparchitect/buzzbox:latest
 ```
 
@@ -66,11 +66,11 @@ podman run --detach \
   --publish 127.0.0.1:3000:3000 \
   --volume buzzbox-workspace:/workspace \
   --volume buzzbox-services:/var/lib/buzzbox \
-  --volume buzzbox-config:/home/buzzbox/.config \
-  --volume buzzbox-data:/home/buzzbox/.local/share \
-  --volume buzzbox-nest:/home/buzzbox/.buzz \
-  --volume buzzbox-codex:/home/buzzbox/.codex \
-  --volume buzzbox-claude:/home/buzzbox/.claude \
+  --volume buzzbox-config:/home/agent/.config \
+  --volume buzzbox-data:/home/agent/.local/share \
+  --volume buzzbox-nest:/home/agent/.buzz \
+  --volume buzzbox-codex:/home/agent/.codex \
+  --volume buzzbox-claude:/home/agent/.claude \
   ghcr.io/pdparchitect/buzzbox:latest
 ```
 
@@ -91,11 +91,11 @@ container run --detach \
   --publish 127.0.0.1:3000:3000 \
   --volume buzzbox-workspace:/workspace \
   --volume buzzbox-services:/var/lib/buzzbox \
-  --volume buzzbox-config:/home/buzzbox/.config \
-  --volume buzzbox-data:/home/buzzbox/.local/share \
-  --volume buzzbox-nest:/home/buzzbox/.buzz \
-  --volume buzzbox-codex:/home/buzzbox/.codex \
-  --volume buzzbox-claude:/home/buzzbox/.claude \
+  --volume buzzbox-config:/home/agent/.config \
+  --volume buzzbox-data:/home/agent/.local/share \
+  --volume buzzbox-nest:/home/agent/.buzz \
+  --volume buzzbox-codex:/home/agent/.codex \
+  --volume buzzbox-claude:/home/agent/.claude \
   ghcr.io/pdparchitect/buzzbox:latest
 ```
 
@@ -129,7 +129,7 @@ One command boots:
 - PostgreSQL, Redis, and MinIO for the relay;
 - the bundled `buzz`, `buzz-acp`, `buzz-agent`, and `buzz-dev-mcp` tools;
 - Codex, Claude Code, Goose, `codex-acp`, and `claude-agent-acp`; and
-- the Openbox/KasmVNC desktop adapted from the Pantalk example.
+- the Openbox/KasmVNC desktop, supplied by the Launcher desktop base.
 
 The environment is self-contained. It does not require a host Docker socket or
 a separate Compose stack.
@@ -154,6 +154,38 @@ Buzzbox therefore lives off the land, surfacing the real desktop client through
 KasmVNC rather than substituting a thinner one — which also keeps it aligned
 with Buzznode, so agent behaviour developed against one desktop transfers to
 the other.
+
+## Relationship to the Launcher desktop base
+
+Buzzbox is a product image on top of
+`ghcr.io/pdparchitect/launcher-image-base-desktop`, the same substrate the
+other Launcher desktops use. The base supplies Ubuntu, Node, KasmVNC, Openbox,
+Cortile, tint2, kitty, the browser, the GTK theme, the `agent` account, and the
+entrypoint. This repository supplies only Buzz.
+
+That split is what the source layout reflects:
+
+| Path                             | What it is                                         |
+| -------------------------------- | -------------------------------------------------- |
+| `Dockerfile`                     | The Buzz Desktop build, the relay stack, the agent runtimes |
+| `overlay/`                       | Files copied over the base's defaults               |
+| `overlay/etc/desktop/startup.d/` | Programs the entrypoint runs before the session     |
+| `overlay/etc/desktop/session.d/` | Programs the session runs once it has a display     |
+
+Two consequences are worth knowing:
+
+- The desktop user is `agent`, homed at `/home/agent`, and desktop logs live in
+  `/var/log/launcher-desktop`. Buzz's own service state stays in
+  `/var/lib/buzzbox`.
+- Desktop-level settings use the base's names — `DESKTOP_RESOLUTION`,
+  `DESKTOP_VNC_STATS`, `DESKTOP_TITLE`. Buzz-level settings keep their
+  `BUZZBOX_*` and `BUZZ_*` names.
+
+To build against a different base, override `DESKTOP_IMAGE`:
+
+```bash
+make up DESKTOP_IMAGE=ghcr.io/pdparchitect/launcher-image-base-desktop:0.2.0
+```
 
 ## Build locally
 
@@ -300,8 +332,8 @@ with a released client:
 
 | Component          | Version                   |
 | ------------------ | ------------------------- |
-| Buzz desktop       | `0.5.0`                   |
-| Buzz relay         | upstream commit `4a977c5` |
+| Buzz desktop       | `0.5.2`                   |
+| Buzz relay         | upstream commit `3e48f1b` |
 | Codex              | `0.145.0`                 |
 | Claude Code        | `2.1.220`                 |
 | Goose              | `1.44.0`                  |

@@ -1,0 +1,223 @@
+#!/bin/bash
+# Start the local Buzz stack: PostgreSQL, Redis, MinIO, and the Buzz relay.
+#
+# The desktop base runs this synchronously before the X session exists, which
+# is the ordering this product needs anyway: the relay is listening by the time
+# the desktop opens, and a failure here is reported before a user sees a
+# session. Each service is left running in the background and the desktop base
+# takes over as PID 1.
+#
+# Shutdown is the container's. There is no shutdown hook in the base, so
+# PostgreSQL is stopped by the runtime rather than by pg_ctl and recovers from
+# its WAL on the next boot - which is what that WAL is for. Nothing else here
+# keeps state that a hard stop can damage.
+
+set -euo pipefail
+
+runtime_user="${DESKTOP_RUNTIME_USER:-agent}"
+export HOME=/home/agent
+
+export BUZZ_RELAY_PORT="${BUZZ_RELAY_PORT:-3000}"
+export BUZZ_HEALTH_PORT="${BUZZ_HEALTH_PORT:-8080}"
+export BUZZ_RELAY_URL="${BUZZ_RELAY_URL:-ws://127.0.0.1:$BUZZ_RELAY_PORT}"
+export BUZZ_WEB_DIR="${BUZZ_WEB_DIR:-/srv/buzz/web}"
+export BUZZ_ADMIN_WEB_DIR="${BUZZ_ADMIN_WEB_DIR:-/srv/buzz/admin-web}"
+
+state_dir="${BUZZBOX_STATE_DIR:-/var/lib/buzzbox}"
+postgres_dir="$state_dir/postgres"
+redis_dir="$state_dir/redis"
+minio_dir="$state_dir/minio"
+git_dir="$state_dir/git"
+secrets_dir="$state_dir/secrets"
+log_dir=/var/log/launcher-desktop
+
+public_relay_url="${BUZZBOX_PUBLIC_RELAY_URL:-$BUZZ_RELAY_URL}"
+if ! node -e '
+    const url = new URL(process.argv[1]);
+    if (url.protocol !== "ws:" && url.protocol !== "wss:") process.exit(1);
+' "$public_relay_url"; then
+    echo "[buzzbox] invalid BUZZBOX_PUBLIC_RELAY_URL: $public_relay_url" >&2
+    exit 1
+fi
+
+public_media_base_url="$(node -e '
+    const url = new URL(process.argv[1]);
+    url.protocol = url.protocol === "wss:" ? "https:" : "http:";
+    process.stdout.write(`${url.origin}/media`);
+' "$public_relay_url")"
+public_relay_domain="$(node -e '
+    process.stdout.write(new URL(process.argv[1]).hostname);
+' "$public_relay_url")"
+
+mkdir -p \
+    "$postgres_dir" "$redis_dir" "$minio_dir" "$git_dir" "$secrets_dir" \
+    "$log_dir"
+chown "$runtime_user:$runtime_user" \
+    "$postgres_dir" "$redis_dir" "$minio_dir" "$git_dir" "$secrets_dir"
+chmod 700 "$secrets_dir"
+
+stable_secret() {
+    local name="$1"
+    local path="$secrets_dir/$name"
+
+    if [ ! -s "$path" ]; then
+        openssl rand -hex 32 > "$path"
+        chown "$runtime_user:$runtime_user" "$path"
+        chmod 600 "$path"
+    fi
+
+    tr -d '[:space:]' < "$path"
+}
+
+export BUZZ_RELAY_PRIVATE_KEY="${BUZZ_RELAY_PRIVATE_KEY:-$(stable_secret relay-private-key)}"
+export BUZZ_GIT_HOOK_HMAC_SECRET="${BUZZ_GIT_HOOK_HMAC_SECRET:-$(stable_secret git-hook-hmac)}"
+export MINIO_ROOT_USER="${BUZZ_S3_ACCESS_KEY:-buzzbox}"
+export MINIO_ROOT_PASSWORD="${BUZZ_S3_SECRET_KEY:-$(stable_secret minio-secret)}"
+export BUZZ_S3_ACCESS_KEY="$MINIO_ROOT_USER"
+export BUZZ_S3_SECRET_KEY="$MINIO_ROOT_PASSWORD"
+export BUZZ_S3_BUCKET="${BUZZ_S3_BUCKET:-buzz-media}"
+
+# Every value interpolated into a `su -c` string is quoted the same way the
+# relay URLs are. Most of these can be supplied through the environment, so an
+# unquoted space or quote character in one would otherwise break out of the
+# command being built rather than fail cleanly.
+printf -v postgres_dir_q '%q' "$postgres_dir"
+printf -v redis_dir_q '%q' "$redis_dir"
+printf -v minio_dir_q '%q' "$minio_dir"
+printf -v git_dir_q '%q' "$git_dir"
+printf -v s3_access_key_q '%q' "$BUZZ_S3_ACCESS_KEY"
+printf -v s3_secret_key_q '%q' "$BUZZ_S3_SECRET_KEY"
+printf -v s3_bucket_q '%q' "$BUZZ_S3_BUCKET"
+printf -v relay_private_key_q '%q' "$BUZZ_RELAY_PRIVATE_KEY"
+printf -v git_hook_secret_q '%q' "$BUZZ_GIT_HOOK_HMAC_SECRET"
+printf -v buzz_web_dir_q '%q' "$BUZZ_WEB_DIR"
+printf -v buzz_admin_web_dir_q '%q' "$BUZZ_ADMIN_WEB_DIR"
+printf -v relay_bind_q '%q' "0.0.0.0:$BUZZ_RELAY_PORT"
+printf -v health_port_q '%q' "$BUZZ_HEALTH_PORT"
+printf -v public_relay_url_q '%q' "$public_relay_url"
+printf -v public_media_base_url_q '%q' "$public_media_base_url"
+printf -v public_relay_domain_q '%q' "$public_relay_domain"
+
+pg_bindir="$(pg_config --bindir)"
+printf -v pg_bindir_q '%q' "$pg_bindir"
+printf -v pg_options_q '%q' "-h 127.0.0.1 -p 5432 -k $postgres_dir"
+
+# Detached into its own session so it survives this script returning to the
+# entrypoint. Without setsid the service is killed with this script's process
+# group the moment the base moves on to starting the desktop.
+#
+# Every service logs to stdout and this redirect captures it. None of them may
+# be told to open the same path themselves: this script runs as root, so the
+# redirect creates a root-owned file, and the service - which runs as the
+# unprivileged desktop account - then cannot open it. Redis is the strict one
+# and refuses to start at all ("Can't open the log file: Permission denied").
+run_service() {
+    local log_file="$1"
+    shift
+    setsid su -s /bin/bash -c "$*" "$runtime_user" \
+        >>"$log_dir/$log_file" 2>&1 &
+}
+
+wait_for() {
+    local label="$1" log_file="$2" attempts="$3"
+    shift 3
+
+    for attempt in $(seq 1 "$attempts"); do
+        if "$@" >/dev/null 2>&1; then
+            return 0
+        fi
+        if [ "$attempt" -eq "$attempts" ]; then
+            echo "[buzzbox] $label did not become ready" >&2
+            tail -n 150 "$log_dir/$log_file" >&2 || true
+            return 1
+        fi
+        sleep 1
+    done
+}
+
+if [ ! -s "$postgres_dir/PG_VERSION" ]; then
+    su -s /bin/bash -c \
+        "$pg_bindir_q/initdb -D $postgres_dir_q -U buzz --auth-local=trust --auth-host=trust" \
+        "$runtime_user" >"$log_dir/postgres-init.log" 2>&1
+    echo "[buzzbox] initialized PostgreSQL"
+fi
+
+# pg_ctl daemonizes on its own, so this one is not detached with run_service.
+su -s /bin/bash -c \
+    "$pg_bindir_q/pg_ctl -D $postgres_dir_q -l $log_dir/postgres.log \
+        -o $pg_options_q start" \
+    "$runtime_user" >/dev/null
+
+wait_for PostgreSQL postgres.log 40 pg_isready -h 127.0.0.1 -p 5432 -U buzz
+
+if ! psql -h 127.0.0.1 -U buzz -d postgres -tAc \
+    "SELECT 1 FROM pg_database WHERE datname = 'buzz'" | grep -q 1; then
+    createdb -h 127.0.0.1 -U buzz buzz
+fi
+echo "[buzzbox] PostgreSQL ready"
+
+run_service redis.log "
+    exec redis-server \
+        --bind 127.0.0.1 \
+        --port 6379 \
+        --protected-mode yes \
+        --dir $redis_dir_q \
+        --appendonly yes
+"
+wait_for Redis redis.log 30 \
+    bash -c 'redis-cli -h 127.0.0.1 ping 2>/dev/null | grep -q PONG'
+echo "[buzzbox] Redis ready"
+
+run_service minio.log "
+    export MINIO_ROOT_USER=$s3_access_key_q
+    export MINIO_ROOT_PASSWORD=$s3_secret_key_q
+    exec minio server $minio_dir_q \
+        --address 127.0.0.1:9000 \
+        --console-address 127.0.0.1:9001
+"
+wait_for MinIO minio.log 40 \
+    curl -fsS http://127.0.0.1:9000/minio/health/live
+
+mc alias set buzzbox http://127.0.0.1:9000 \
+    "$BUZZ_S3_ACCESS_KEY" "$BUZZ_S3_SECRET_KEY" >/dev/null
+mc mb --ignore-existing "buzzbox/$BUZZ_S3_BUCKET" >/dev/null
+mc anonymous set none "buzzbox/$BUZZ_S3_BUCKET" >/dev/null
+echo "[buzzbox] MinIO ready"
+
+if [ "${BUZZ_RELAY_AUTOSTART:-true}" != "true" ]; then
+    echo "[buzzbox] relay autostart disabled"
+    exit 0
+fi
+
+run_service buzz-relay.log "
+    export HOME=/home/agent
+    export DATABASE_URL='postgres://buzz@127.0.0.1:5432/buzz'
+    export REDIS_URL='redis://127.0.0.1:6379'
+    export RELAY_URL=$public_relay_url_q
+    export BUZZ_BIND_ADDR=$relay_bind_q
+    export BUZZ_HEALTH_PORT=$health_port_q
+    export BUZZ_METRICS_PORT='9102'
+    export BUZZ_RELAY_PRIVATE_KEY=$relay_private_key_q
+    export BUZZ_GIT_HOOK_HMAC_SECRET=$git_hook_secret_q
+    export BUZZ_S3_ENDPOINT='http://127.0.0.1:9000'
+    export BUZZ_S3_ACCESS_KEY=$s3_access_key_q
+    export BUZZ_S3_SECRET_KEY=$s3_secret_key_q
+    export BUZZ_S3_BUCKET=$s3_bucket_q
+    export BUZZ_MEDIA_BASE_URL=$public_media_base_url_q
+    export BUZZ_MEDIA_SERVER_DOMAIN=$public_relay_domain_q
+    export BUZZ_GIT_REPO_PATH=$git_dir_q
+    export BUZZ_AUTO_MIGRATE='true'
+    export BUZZ_GIT_CONFORMANCE_PROBE='false'
+    export BUZZ_REQUIRE_AUTH_TOKEN='false'
+    export BUZZ_REQUIRE_RELAY_MEMBERSHIP='false'
+    export BUZZ_ALLOW_NIP_OA_AUTH='true'
+    export BUZZ_WEB_DIR=$buzz_web_dir_q
+    export BUZZ_ADMIN_WEB_DIR=$buzz_admin_web_dir_q
+    export RUST_LOG='buzz_relay=info,buzz_db=info,buzz_auth=info'
+    exec buzz-relay
+"
+wait_for "Buzz relay" buzz-relay.log 60 \
+    curl -fsS "http://127.0.0.1:$BUZZ_HEALTH_PORT/_readiness"
+
+echo "[buzzbox] Buzz relay ready at $BUZZ_RELAY_URL"
+echo "[buzzbox] external relay URL: $public_relay_url"

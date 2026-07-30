@@ -70,7 +70,7 @@ fi
 "$docker" exec --detach \
     --user agent \
     --env DISPLAY=:1 \
-    --env HOME=/home/buzzbox \
+    --env HOME=/home/agent \
     "$container" \
     chromium --new-window file:///opt/browser/index.html
 

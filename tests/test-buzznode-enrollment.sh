@@ -40,7 +40,7 @@ jq -n \
       }
     ]' > "$store"
 
-cli="$project_dir/shell/buzznode-enrollment"
+cli="$project_dir/overlay/usr/local/bin/buzznode-enrollment"
 list_output="$(BUZZBOX_AGENT_STORE="$store" "$cli" list)"
 grep -q 'Node agent' <<<"$list_output"
 if grep -q 'Node template' <<<"$list_output"; then
@@ -113,9 +113,9 @@ if grep -Fq $'\033[' <<<"$plain_output"; then
     exit 1
 fi
 grep -Fq 'buzznode-enrollment create; exec bash' \
-    "$project_dir/openbox/menu.xml"
+    "$project_dir/overlay/etc/xdg/openbox/menu.xml"
 grep -Fq 'buzznode-enrollment; exec bash' \
-    "$project_dir/openbox/menu.xml"
+    "$project_dir/overlay/etc/xdg/openbox/menu.xml"
 
 draft_store="$temporary_dir/draft-managed-agents.json"
 cp "$store" "$draft_store"

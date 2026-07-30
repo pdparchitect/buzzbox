@@ -1,0 +1,19 @@
+#!/bin/bash
+# The panel's status slot: whether the local Buzz relay is up.
+#
+# tint2 runs this every few seconds and renders the result as pango markup, so
+# it has to stay to one short line. The relay's readiness endpoint is the same
+# one the image's health check uses.
+
+set -uo pipefail
+
+relay_port="${BUZZ_RELAY_PORT:-3000}"
+readiness_url="http://127.0.0.1:${BUZZ_HEALTH_PORT:-8080}/_readiness"
+
+if [ "${BUZZ_RELAY_AUTOSTART:-true}" != "true" ]; then
+    printf '<span foreground="#888888">○</span> relay off\n'
+elif curl -fsS --max-time 1 "$readiness_url" >/dev/null 2>&1; then
+    printf '<span foreground="#5fd787">●</span> relay %s\n' "$relay_port"
+else
+    printf '<span foreground="#ffaf00">○</span> relay starting\n'
+fi
