@@ -13,7 +13,7 @@ BUZZ_VERSION ?= 0.5.2
 BUZZ_DEB_SHA256 ?= 3f022bc31ed579e045946e6acab8483639bcb94e62c1e70f67b97b22f8f879c5
 BUZZ_SOURCE_SHA ?= 3e48f1b2365d326ee1c9582448d86a99b44ecd5d
 BUZZ_RELAY_IMAGE ?= ghcr.io/block/buzz:sha-3e48f1b
-DESKTOP_IMAGE ?= ghcr.io/pdparchitect/launcher-image-base-desktop:0.1.1
+DESKTOP_IMAGE ?= ghcr.io/pdparchitect/launcher-image-base-desktop:0.1.2
 CODEX_VERSION ?= 0.145.0
 CLAUDE_CODE_VERSION ?= 2.1.220
 CODEX_ACP_VERSION ?= 1.1.7
@@ -25,7 +25,7 @@ BIND_ADDRESS ?= 127.0.0.1
 PORT ?= 6903
 RELAY_PORT ?= 3000
 # The container-side ports. 6901 is the desktop base's and is not redeclared
-# here, the same way hermes, openclaw, and codex-pets do not redeclare it.
+# here, the same way hermes, openclaw, and petbox do not redeclare it.
 RELAY_CONTAINER_PORT ?= 3000
 HEALTH_PORT ?= 8080
 BUZZ_NETWORK ?=
@@ -98,12 +98,14 @@ check:
 	@grep -q '    BUZZ_RELAY_PORT=$(RELAY_CONTAINER_PORT) \\' Dockerfile
 	@grep -q '    BUZZ_HEALTH_PORT=$(HEALTH_PORT) \\' Dockerfile
 	@grep -q '^EXPOSE $(RELAY_CONTAINER_PORT)$$' Dockerfile
+	@grep -q 'http://127.0.0.1:6902/healthz' Dockerfile
 	@grep -q 'cd /workspace' overlay/etc/bash.bashrc.d/buzzbox-prompt.sh
 	@grep -q 'BUZZBOX_CODEX_SANDBOX_MODE' overlay/etc/desktop/startup.d/05-agent-runtime-trust
 	@grep -q 'BUZZBOX_CODEX_SANDBOX_MODE' README.md
 	@grep -q '\[ -n "$${PS1:-}" \]' overlay/etc/bash.bashrc.d/buzzbox-prompt.sh
 	@test "$$(jq -er '.schemaVersion' launcher/application.json)" = 2
 	@! jq -e 'has("image")' launcher/application.json >/dev/null
+	@jq -e '.interfaces.preview.kind == "preview" and .interfaces.preview.port == 6902 and .interfaces.preview.path == "/preview.jpg"' launcher/application.json >/dev/null
 	@for asset in $$(jq -er '.media.icon, .media.cover, .media.screenshots[].source' launcher/application.json); do \
 		test -f "launcher/$$asset"; \
 	done

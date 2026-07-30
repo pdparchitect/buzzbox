@@ -13,7 +13,7 @@
 # Upstream publishes the Linux desktop package only for AMD64; ARM64 builds the
 # same immutable source tag and exact commit natively.
 
-ARG DESKTOP_IMAGE=ghcr.io/pdparchitect/launcher-image-base-desktop:0.1.1
+ARG DESKTOP_IMAGE=ghcr.io/pdparchitect/launcher-image-base-desktop:0.1.2
 
 ARG BUZZ_RELAY_IMAGE=ghcr.io/block/buzz:sha-3e48f1b
 FROM ${BUZZ_RELAY_IMAGE} AS buzz-relay
@@ -254,18 +254,18 @@ EXPOSE 3000
 WORKDIR /workspace
 VOLUME ["/workspace", "/var/lib/buzzbox", "/home/agent/.buzz", "/home/agent/.codex", "/home/agent/.claude"]
 
-# The base already health-checks the desktop on 6901, and this repeats that
-# probe because a HEALTHCHECK replaces the inherited one rather than adding to
-# it. The relay probe is the reason for overriding at all, and it only applies
-# when the relay is expected: disabling it with BUZZ_RELAY_AUTOSTART is a
-# supported configuration, and probing the health port unconditionally would
-# hold such a container unhealthy forever.
+# A HEALTHCHECK replaces the inherited one rather than adding to it, so repeat
+# both base probes before checking the relay. The relay probe only applies when
+# the relay is expected: disabling it with BUZZ_RELAY_AUTOSTART is a supported
+# configuration, and probing the health port unconditionally would hold such a
+# container unhealthy forever.
 #
 # Interval, timeout, and retries match the base. Only start-period differs: the
 # entrypoint brings PostgreSQL, Redis, MinIO, and the relay up before it starts
 # the desktop, so this image has further to go before its first healthy probe.
 HEALTHCHECK --interval=10s --timeout=3s --start-period=90s --retries=5 \
     CMD curl -fsS http://127.0.0.1:6901/ >/dev/null && \
+        curl -fsS http://127.0.0.1:6902/healthz >/dev/null && \
         { [ "${BUZZ_RELAY_AUTOSTART:-true}" != "true" ] || \
           curl -fsS "http://127.0.0.1:${BUZZ_HEALTH_PORT:-8080}/_readiness" \
             >/dev/null; } || exit 1
