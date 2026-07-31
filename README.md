@@ -32,11 +32,25 @@ bundle, but Buzznode does not require Buzzbox to run.
 
 ## Quick start
 
-Buzzbox is published as a complete image on GitHub Container Registry. One
-command starts the whole workspace. Release tags contain native AMD64 and ARM64
-images.
+### Launcher (recommended)
 
-### Docker
+The easiest way to run Buzzbox is with
+[Launcher](https://github.com/pdparchitect/launcher). Launcher discovers,
+installs, starts, stops, and updates Buzzbox while managing its container,
+ports, and persistent storage for you.
+
+1. [Download the latest Launcher release](https://github.com/pdparchitect/launcher/releases/latest).
+2. Open **Marketplace**, select **Buzzbox**, and install it.
+3. Choose **Open agent** when installation finishes.
+
+Launcher uses Apple `container` on macOS and Docker on Linux.
+
+### Run the container manually
+
+Buzzbox is also published as a complete image on GitHub Container Registry.
+Release tags contain native AMD64 and ARM64 images.
+
+#### Docker
 
 ```bash
 docker run --detach \
@@ -55,7 +69,7 @@ docker run --detach \
   ghcr.io/pdparchitect/buzzbox:latest
 ```
 
-### Podman
+#### Podman
 
 ```bash
 podman run --detach \
@@ -74,7 +88,7 @@ podman run --detach \
   ghcr.io/pdparchitect/buzzbox:latest
 ```
 
-### Apple container
+#### Apple container
 
 Apple's [`container`](https://github.com/apple/container) tool requires Apple
 silicon and macOS 26 or later. Start its service once, then allocate additional
