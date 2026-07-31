@@ -13,7 +13,7 @@
 # Upstream publishes the Linux desktop package only for AMD64; ARM64 builds the
 # same immutable source tag and exact commit natively.
 
-ARG DESKTOP_IMAGE=ghcr.io/pdparchitect/launcher-image-base-desktop:0.1.2
+ARG DESKTOP_IMAGE=ghcr.io/pdparchitect/launcher-image-base-desktop:0.1.3
 
 ARG BUZZ_RELAY_IMAGE=ghcr.io/block/buzz:sha-3e48f1b
 FROM ${BUZZ_RELAY_IMAGE} AS buzz-relay

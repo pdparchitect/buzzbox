@@ -6,6 +6,21 @@ All notable changes to Buzzbox are documented here, following
 
 ## [Unreleased]
 
+## [0.7.5] - 2026-07-31
+
+### Fixed
+
+- Open fixed-ownership Apple `container` mounts without attempting unsupported
+  ownership changes while writing Codex and Claude configuration.
+- Keep the embedded PostgreSQL, Redis, MinIO, and Buzz relay stack under the
+  unprivileged `agent` account. Its service-state mount now selects a
+  runtime-managed volume so PostgreSQL retains the Linux ownership semantics
+  it requires even when the desktop uses VM root.
+
+### Changed
+
+- Update the shared Launcher desktop base to `0.1.3`.
+
 ## [0.7.4] - 2026-07-30
 
 ### Added

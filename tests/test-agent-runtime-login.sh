@@ -81,5 +81,16 @@ grep -Fq 'BUZZBOX_TRUST_WORKSPACE' "$project_dir/overlay/etc/desktop/startup.d/0
 grep -Fq 'trust_level = "trusted"' "$project_dir/overlay/etc/desktop/startup.d/05-agent-runtime-trust"
 grep -Fq 'hasTrustDialogAccepted' "$project_dir/overlay/etc/desktop/startup.d/05-agent-runtime-trust"
 grep -Fq 'BUZZBOX_HARNESS_WORKDIR:-/workspace' "$project_dir/overlay/etc/desktop/startup.d/05-agent-runtime-trust"
+# Apple `container` runs the desktop as root after detecting fixed-ownership
+# mounts. That path must copy configuration without requesting an ownership
+# change which VirtioFS will reject.
+grep -Fq 'if [ "$runtime_user" = root ]; then' \
+    "$project_dir/overlay/etc/desktop/startup.d/05-agent-runtime-trust"
+grep -Fq 'if [ "$runtime_user" != root ]; then' \
+    "$project_dir/overlay/etc/desktop/startup.d/05-agent-runtime-trust"
+grep -Fq 'write_runtime_config()' \
+    "$project_dir/overlay/etc/desktop/startup.d/05-agent-runtime-trust"
+! grep -Fq 'install_as_runtime_user' \
+    "$project_dir/overlay/etc/desktop/startup.d/05-agent-runtime-trust"
 
 echo "Agent runtime login tests passed."
