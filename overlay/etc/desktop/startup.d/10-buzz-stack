@@ -14,7 +14,11 @@
 
 set -euo pipefail
 
-runtime_user="${DESKTOP_RUNTIME_USER:-agent}"
+# PostgreSQL refuses to run as root and validates that its data directory is
+# owned by its process user. Launcher therefore gives this stack a
+# runtime-managed volume even when fixed host mounts make the desktop session
+# itself run as VM root.
+service_user=agent
 export HOME=/home/agent
 
 export BUZZ_RELAY_PORT="${BUZZ_RELAY_PORT:-3000}"
@@ -52,8 +56,9 @@ public_relay_domain="$(node -e '
 mkdir -p \
     "$postgres_dir" "$redis_dir" "$minio_dir" "$git_dir" "$secrets_dir" \
     "$log_dir"
-chown "$runtime_user:$runtime_user" \
-    "$postgres_dir" "$redis_dir" "$minio_dir" "$git_dir" "$secrets_dir"
+chown "$service_user:$service_user" \
+    "$postgres_dir" "$redis_dir" "$minio_dir" "$git_dir" "$secrets_dir" \
+    "$log_dir"
 chmod 700 "$secrets_dir"
 
 stable_secret() {
@@ -62,7 +67,7 @@ stable_secret() {
 
     if [ ! -s "$path" ]; then
         openssl rand -hex 32 > "$path"
-        chown "$runtime_user:$runtime_user" "$path"
+        chown "$service_user:$service_user" "$path"
         chmod 600 "$path"
     fi
 
@@ -114,7 +119,7 @@ printf -v pg_options_q '%q' "-h 127.0.0.1 -p 5432 -k $postgres_dir"
 run_service() {
     local log_file="$1"
     shift
-    setsid su -s /bin/bash -c "$*" "$runtime_user" \
+    setsid su -s /bin/bash -c "$*" "$service_user" \
         >>"$log_dir/$log_file" 2>&1 &
 }
 
@@ -138,7 +143,7 @@ wait_for() {
 if [ ! -s "$postgres_dir/PG_VERSION" ]; then
     su -s /bin/bash -c \
         "$pg_bindir_q/initdb -D $postgres_dir_q -U buzz --auth-local=trust --auth-host=trust" \
-        "$runtime_user" >"$log_dir/postgres-init.log" 2>&1
+        "$service_user" >"$log_dir/postgres-init.log" 2>&1
     echo "[buzzbox] initialized PostgreSQL"
 fi
 
@@ -146,7 +151,7 @@ fi
 su -s /bin/bash -c \
     "$pg_bindir_q/pg_ctl -D $postgres_dir_q -l $log_dir/postgres.log \
         -o $pg_options_q start" \
-    "$runtime_user" >/dev/null
+    "$service_user" >/dev/null
 
 wait_for PostgreSQL postgres.log 40 pg_isready -h 127.0.0.1 -p 5432 -U buzz
 
