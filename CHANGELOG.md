@@ -6,6 +6,13 @@ All notable changes to Buzzbox are documented here, following
 
 ## [Unreleased]
 
+## [0.7.8] - 2026-07-31
+
+### Added
+
+- Update to Launcher desktop substrate `0.1.7` and register its shared health
+  and native-notification bridge interfaces.
+
 ## [0.7.7] - 2026-07-31
 
 ### Fixed
