@@ -91,6 +91,21 @@ fi
     await "the buzz-desktop process" pgrep -f "(^|/)buzz-desktop($| )"
 '
 
+# The desktop base owns this contract. Product processes must be able to use
+# the inherited display environment without locating or copying X11 cookies.
+x_access=false
+for attempt in $(seq 1 20); do
+    if "$docker" exec --user agent "$container" xprop -root >/dev/null 2>&1; then
+        x_access=true
+        break
+    fi
+    sleep 1
+done
+if [ "$x_access" != "true" ]; then
+    echo "The agent account could not authenticate to the X display." >&2
+    exit 1
+fi
+
 desktop_ready=false
 for attempt in $(seq 1 30); do
     if "$docker" exec \
