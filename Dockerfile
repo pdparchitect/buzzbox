@@ -13,9 +13,9 @@
 # Upstream publishes the Linux desktop package only for AMD64; ARM64 builds the
 # same immutable source tag and exact commit natively.
 
-ARG DESKTOP_IMAGE=ghcr.io/pdparchitect/launcher-image-base-desktop:0.1.7
+ARG DESKTOP_IMAGE=ghcr.io/pdparchitect/launcher-image-base-desktop:0.1.8
 
-ARG BUZZ_RELAY_IMAGE=ghcr.io/block/buzz:sha-3e48f1b
+ARG BUZZ_RELAY_IMAGE=ghcr.io/block/buzz:sha-3a96ace
 FROM ${BUZZ_RELAY_IMAGE} AS buzz-relay
 
 FROM minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e AS minio
@@ -29,9 +29,10 @@ FROM rust:1.95-bookworm AS buzz-desktop
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 ARG TARGETARCH
-ARG BUZZ_VERSION=0.5.2
-ARG BUZZ_DEB_SHA256=3f022bc31ed579e045946e6acab8483639bcb94e62c1e70f67b97b22f8f879c5
-ARG BUZZ_SOURCE_SHA=3e48f1b2365d326ee1c9582448d86a99b44ecd5d
+ARG BUZZ_VERSION=0.5.3
+ARG BUZZ_RELEASE_TAG=desktop-v0.5.3
+ARG BUZZ_DEB_SHA256=ae20163ef481ccbf3531b9806996d7580a3a24f9258a54698c75fdcb8b16f14b
+ARG BUZZ_SOURCE_SHA=3a96acea09b4a9e3f02c3a26cfb0607d2ccacf42
 
 RUN set -eux; \
     arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
@@ -58,11 +59,11 @@ RUN set -eux; \
     if [ "$arch" = "amd64" ]; then \
         buzz_deb="/out/Buzz.deb"; \
         curl -fsSL \
-            "https://github.com/block/buzz/releases/download/v${BUZZ_VERSION}/Buzz_${BUZZ_VERSION}_amd64.deb" \
+            "https://github.com/block/buzz/releases/download/${BUZZ_RELEASE_TAG}/Buzz_${BUZZ_VERSION}_amd64.deb" \
             -o "$buzz_deb"; \
         echo "${BUZZ_DEB_SHA256}  ${buzz_deb}" | sha256sum -c -; \
     elif [ "$arch" = "arm64" ]; then \
-        git clone --branch "v${BUZZ_VERSION}" --depth 1 \
+        git clone --branch "${BUZZ_RELEASE_TAG}" --depth 1 \
             https://github.com/block/buzz.git /tmp/buzz; \
         cd /tmp/buzz; \
         test "$(git rev-parse HEAD)" = "$BUZZ_SOURCE_SHA"; \
@@ -177,8 +178,8 @@ COPY --from=minio-client /usr/bin/mc /usr/local/bin/mc
 
 # Install the architecture's package produced above. Both variants include
 # buzz-desktop and the five sidecars at the same paths.
-ARG BUZZ_VERSION=0.5.2
-ARG BUZZ_SOURCE_SHA=3e48f1b2365d326ee1c9582448d86a99b44ecd5d
+ARG BUZZ_VERSION=0.5.3
+ARG BUZZ_SOURCE_SHA=3a96acea09b4a9e3f02c3a26cfb0607d2ccacf42
 ARG BUZZ_SOURCE_URL=https://github.com/block/buzz
 COPY --from=buzz-desktop /out/Buzz.deb /tmp/Buzz.deb
 RUN set -eux; \
