@@ -6,6 +6,22 @@ All notable changes to Buzzbox are documented here, following
 
 ## [Unreleased]
 
+## [0.7.10] - 2026-07-31
+
+### Changed
+
+- Update Buzz Desktop to `0.5.3` and the matching relay to upstream commit
+  `3a96ace`.
+- Track Buzz's explicit release tag separately from its package version now
+  that immutable desktop release tags use the `desktop-v*` prefix.
+
+## [0.7.9] - 2026-07-31
+
+### Fixed
+
+- Update to Launcher desktop substrate `0.1.8` so `notify-send` reaches native
+  notifications from agents and root container shells.
+
 ## [0.7.8] - 2026-07-31
 
 ### Added

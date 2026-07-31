@@ -346,8 +346,8 @@ with a released client:
 
 | Component          | Version                   |
 | ------------------ | ------------------------- |
-| Buzz desktop       | `0.5.2`                   |
-| Buzz relay         | upstream commit `3e48f1b` |
+| Buzz desktop       | `0.5.3`                   |
+| Buzz relay         | upstream commit `3a96ace` |
 | Codex              | `0.145.0`                 |
 | Claude Code        | `2.1.220`                 |
 | Goose              | `1.44.0`                  |
