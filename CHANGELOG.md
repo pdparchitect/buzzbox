@@ -6,6 +6,23 @@ All notable changes to Buzzbox are documented here, following
 
 ## [Unreleased]
 
+## [0.7.7] - 2026-07-31
+
+### Fixed
+
+- Update the shared Launcher desktop base to `0.1.6`, keeping Chrome's software
+  renderer available without a GPU and allowing root-launched Chromium
+  processes to authenticate to the X display and paint their browser surfaces
+  in Apple fixed-mount sessions.
+
+## [0.7.6] - 2026-07-31
+
+### Fixed
+
+- Update the shared Launcher desktop base to `0.1.4`, allowing unprivileged
+  agent and desktop processes to authenticate to the display when Apple
+  fixed-ownership mounts require the desktop session itself to run as root.
+
 ## [0.7.5] - 2026-07-31
 
 ### Fixed
