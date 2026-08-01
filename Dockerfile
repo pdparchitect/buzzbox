@@ -13,7 +13,7 @@
 # Upstream publishes the Linux desktop package only for AMD64; ARM64 builds the
 # same immutable source tag and exact commit natively.
 
-ARG DESKTOP_IMAGE=ghcr.io/pdparchitect/launcher-image-base-desktop:0.1.8
+ARG DESKTOP_IMAGE=ghcr.io/pdparchitect/launcher-image-base-desktop:0.1.9
 
 ARG BUZZ_RELAY_IMAGE=ghcr.io/block/buzz:sha-3a96ace
 FROM ${BUZZ_RELAY_IMAGE} AS buzz-relay
@@ -100,6 +100,10 @@ ARG TARGETARCH
 # Tauri desktop links against. The desktop base already carries the browser's
 # own libraries; these are the ones only buzz-desktop needs. xclip backs the
 # enrollment bundle's clipboard hand-off.
+#
+# The Secret Service that Buzz stores its identity in is not here either: the
+# desktop base owns the session keyring, as it owns the session bus and the
+# notification service.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     postgresql postgresql-client redis-server \
     libwebkit2gtk-4.1-0 libgtk-3-0 libayatana-appindicator3-1 librsvg2-2 \
@@ -200,6 +204,8 @@ RUN set -eux; \
 # brand-new volume.
 RUN mkdir -p \
         /var/lib/buzzbox \
+        /home/agent/.config \
+        /home/agent/.local/share \
         /home/agent/.buzz \
         /home/agent/.codex \
         /home/agent/.claude && \
@@ -235,7 +241,7 @@ RUN kasm-patch "Buzzbox"
 # session program that waits for it, the panel status, and the health check
 # below - so the port lives in one place rather than in six.
 ENV DESKTOP_TITLE="Buzzbox" \
-    DESKTOP_PERSISTENT_PATHS="/var/lib/buzzbox /home/agent/.buzz /home/agent/.codex /home/agent/.claude" \
+    DESKTOP_PERSISTENT_PATHS="/var/lib/buzzbox /home/agent/.config /home/agent/.local/share /home/agent/.buzz /home/agent/.codex /home/agent/.claude" \
     BUZZ_RELAY_PORT=3000 \
     BUZZ_HEALTH_PORT=8080 \
     BUZZ_RELAY_URL=ws://127.0.0.1:3000 \
@@ -253,7 +259,13 @@ LABEL org.opencontainers.image.title="Buzzbox" \
 # product. Only the relay is this image's to declare.
 EXPOSE 3000
 WORKDIR /workspace
-VOLUME ["/workspace", "/var/lib/buzzbox", "/home/agent/.buzz", "/home/agent/.codex", "/home/agent/.claude"]
+
+# Buzz keeps its identity in the session keyring under /home/agent/.local/share
+# and its desktop configuration under /home/agent/.config. Both were volumes in
+# the documented `docker run` and the Makefile long before they were declared
+# here, which left a Launcher-managed Buzzbox re-creating its identity on every
+# container replacement.
+VOLUME ["/workspace", "/var/lib/buzzbox", "/home/agent/.config", "/home/agent/.local/share", "/home/agent/.buzz", "/home/agent/.codex", "/home/agent/.claude"]
 
 # A HEALTHCHECK replaces the inherited one rather than adding to it, so repeat
 # both base probes before checking the relay. The relay probe only applies when

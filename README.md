@@ -370,6 +370,12 @@ The Makefile creates named volumes for:
 `make stop` removes the container but keeps these volumes. `make recreate`
 therefore preserves identities, messages, service data, and agent logins.
 
+Buzz stores its Nostr identity in the session keyring rather than in a file, so
+`/home/agent/.local/share` is the volume that carries the identity from one
+container to the next. Buzzbox runs `gnome-keyring` for that keyring and
+unlocks it on every boot with a password generated on first use and kept beside
+it, under the same volume. Discard that volume and the identity goes with it.
+
 ## Services
 
 All backing services bind only inside the container:

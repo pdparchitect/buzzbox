@@ -16,6 +16,7 @@ fi
     for command in agent-runtime-login buzzbox buzznode-enrollment \
         buzz-desktop buzz buzz-acp buzz-agent buzz-dev-mcp \
         git-credential-nostr buzz-relay buzz-admin buzz-pair-relay \
+        gnome-keyring-daemon secret-tool \
         codex codex-acp claude claude-agent-acp goose chromium \
         minio mc; do
         command -v "$command" >/dev/null || {
@@ -89,6 +90,31 @@ fi
 
     await "the buzz-relay process" pgrep -x buzz-relay
     await "the buzz-desktop process" pgrep -f "(^|/)buzz-desktop($| )"
+
+    # Buzz keeps its identity in the Secret Service, so a session without one
+    # runs and then loses every identity it is given. The desktop base provides
+    # it; this asserts the pinned substrate actually did, because the failure is
+    # invisible until someone tries to keep an identity.
+    await "the secret service on the session bus" \
+        su -s /bin/bash agent -c "
+            export DBUS_SESSION_BUS_ADDRESS=\$(cat /run/launcher-desktop/dbus-session-address)
+            dbus-send --session --print-reply=literal \
+                --dest=org.freedesktop.DBus /org/freedesktop/DBus \
+                org.freedesktop.DBus.NameHasOwner \
+                string:org.freedesktop.secrets | grep -q true
+        "
+
+    # A round trip, under a timeout. An unlocked default collection is the
+    # difference between storing a secret and blocking forever on a gcr-prompter
+    # dialog nobody can answer, and both look like a running daemon from here.
+    check "a secret survives a store and lookup" \
+        su -s /bin/bash agent -c "
+            export DBUS_SESSION_BUS_ADDRESS=\$(cat /run/launcher-desktop/dbus-session-address)
+            printf %s smoke-value |
+                timeout 20 secret-tool store --label=smoke buzzbox smoke &&
+            test \"\$(timeout 20 secret-tool lookup buzzbox smoke)\" = smoke-value &&
+            timeout 20 secret-tool clear buzzbox smoke
+        "
 '
 
 # The desktop base owns this contract. Product processes must be able to use

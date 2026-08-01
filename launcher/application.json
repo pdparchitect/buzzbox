@@ -58,6 +58,15 @@
       "storage": "volume"
     },
     {
+      "name": "private/config",
+      "target": "/home/agent/.config"
+    },
+    {
+      "name": "private/data",
+      "target": "/home/agent/.local/share",
+      "storage": "volume"
+    },
+    {
       "name": "private/buzz",
       "target": "/home/agent/.buzz"
     },

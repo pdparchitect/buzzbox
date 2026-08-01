@@ -9,6 +9,17 @@ if pgrep -f '(^|/)buzz-desktop($| )' >/dev/null 2>&1; then
     exit 0
 fi
 
+# Buzz stores its identity in the session keyring, which the desktop base
+# starts before any session program, and a keyring reached over an autolaunched
+# private bus is not that keyring. Session programs and shells already have the
+# address; this covers the remaining way Buzz gets started, `docker exec` with
+# no shell between it and this script.
+if [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ] &&
+    [ -s /run/launcher-desktop/dbus-session-address ]; then
+    DBUS_SESSION_BUS_ADDRESS="$(cat /run/launcher-desktop/dbus-session-address)"
+    export DBUS_SESSION_BUS_ADDRESS
+fi
+
 export BUZZ_RELAY_URL="${BUZZ_RELAY_URL:-ws://127.0.0.1:3000}"
 export WEBKIT_DISABLE_COMPOSITING_MODE="${WEBKIT_DISABLE_COMPOSITING_MODE:-1}"
 export LIBGL_ALWAYS_SOFTWARE="${LIBGL_ALWAYS_SOFTWARE:-1}"
