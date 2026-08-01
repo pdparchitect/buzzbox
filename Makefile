@@ -14,7 +14,7 @@ BUZZ_RELEASE_TAG ?= desktop-v0.5.3
 BUZZ_DEB_SHA256 ?= ae20163ef481ccbf3531b9806996d7580a3a24f9258a54698c75fdcb8b16f14b
 BUZZ_SOURCE_SHA ?= 3a96acea09b4a9e3f02c3a26cfb0607d2ccacf42
 BUZZ_RELAY_IMAGE ?= ghcr.io/block/buzz:sha-3a96ace
-DESKTOP_IMAGE ?= ghcr.io/pdparchitect/launcher-image-base-desktop:0.1.8
+DESKTOP_IMAGE ?= ghcr.io/pdparchitect/launcher-image-base-desktop:0.1.9
 CODEX_VERSION ?= 0.145.0
 CLAUDE_CODE_VERSION ?= 2.1.220
 CODEX_ACP_VERSION ?= 1.1.7
@@ -109,6 +109,8 @@ check:
 	@grep -q '\[ -n "$${PS1:-}" \]' overlay/etc/bash.bashrc.d/buzzbox-prompt.sh
 	@test "$$(jq -er '.schemaVersion' launcher/application.json)" = 2
 	@test "$$(jq -er '.mounts[] | select(.name == "private/services") | .storage' launcher/application.json)" = volume
+	@test "$$(jq -er '.mounts[] | select(.name == "private/data") | .storage' launcher/application.json)" = volume
+	@jq -e '[.mounts[].target] | index("/home/agent/.local/share") != null and index("/home/agent/.config") != null' launcher/application.json >/dev/null
 	@! jq -e 'has("image")' launcher/application.json >/dev/null
 	@jq -e '.interfaces.health.kind == "health" and .interfaces.health.port == 6902 and .interfaces.health.path == "/healthz"' launcher/application.json >/dev/null
 	@jq -e '.interfaces.notifications.kind == "notifications" and .interfaces.notifications.port == 6902 and .interfaces.notifications.path == "/notifications"' launcher/application.json >/dev/null

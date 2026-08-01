@@ -6,6 +6,30 @@ All notable changes to Buzzbox are documented here, following
 
 ## [Unreleased]
 
+## [0.7.11] - 2026-08-01
+
+### Fixed
+
+- Update to Launcher desktop substrate `0.1.9`, which provides the session
+  Secret Service. Buzz Desktop `0.5.3` made the OS keyring authoritative for
+  the Nostr identity and migrates `identity.key` into it on first run, and
+  Ubuntu ships no provider for `org.freedesktop.secrets`, so Buzz came up
+  unable to keep an identity and reported `Platform secure storage failure` for
+  every read.
+- Declare `/home/agent/.config` and `/home/agent/.local/share` as volumes and as
+  Launcher mounts. The Makefile and the documented `docker run` had always
+  passed both, but the image and the Launcher application did not declare them,
+  so a Launcher-managed Buzzbox kept the Buzz identity, desktop configuration,
+  and application data in the container layer and lost them whenever the
+  container was replaced.
+
+### Notes
+
+- An existing Buzzbox that has already lost its identity keeps whatever agents
+  and messages the relay holds; only the desktop's own identity is affected.
+  Back up `~/.local/share/xyz.block.buzz.app/identity.key` before upgrading if
+  it is still present - the new volume mounts over the container's copy.
+
 ## [0.7.10] - 2026-07-31
 
 ### Changed
