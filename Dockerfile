@@ -72,6 +72,7 @@ RUN set -eux; \
             -p buzz-cli \
             -p buzz-acp \
             -p buzz-agent \
+            -p buzz-backend-kubernetes \
             -p buzz-dev-mcp \
             -p git-credential-nostr; \
         ./scripts/bundle-sidecars.sh; \
