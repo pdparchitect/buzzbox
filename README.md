@@ -346,13 +346,13 @@ with a released client:
 
 | Component          | Version                   |
 | ------------------ | ------------------------- |
-| Buzz desktop       | `0.5.3`                   |
-| Buzz relay         | upstream commit `3a96ace` |
-| Codex              | `0.145.0`                 |
-| Claude Code        | `2.1.220`                 |
-| Goose              | `1.44.0`                  |
-| Codex ACP adapter  | `1.1.7`                   |
-| Claude ACP adapter | `0.62.0`                  |
+| Buzz desktop       | `0.5.4`                   |
+| Buzz relay         | upstream commit `651f637` |
+| Codex              | `0.146.0`                 |
+| Claude Code        | `2.1.221`                 |
+| Goose              | `1.45.0`                  |
+| Codex ACP adapter  | `1.1.9`                   |
+| Claude ACP adapter | `0.64.2`                  |
 
 The Buzz `.deb` and Goose CLI archive are SHA-256 verified during the build.
 The relay and MinIO stages use immutable container references.

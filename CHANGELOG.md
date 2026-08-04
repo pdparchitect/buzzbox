@@ -6,6 +6,20 @@ All notable changes to Buzzbox are documented here, following
 
 ## [Unreleased]
 
+## [0.7.12] - 2026-08-04
+
+### Changed
+
+- Update Buzz Desktop to `0.5.4` and the matching relay to upstream commit
+  `651f637`.
+- Update the coding agents and their ACP adapters: Codex `0.146.0`, Claude Code
+  `2.1.221`, Goose `1.45.0`, `codex-acp` `1.1.9`, and `claude-agent-acp`
+  `0.64.2`.
+- Pre-activate the pnpm version Buzz's own workspace declares in the ARM64
+  source build. Corepack honours the upstream `packageManager` field, so the
+  older pinned version was fetched and then replaced by a second download
+  during `pnpm install`.
+
 ## [0.7.11] - 2026-08-01
 
 ### Fixed
